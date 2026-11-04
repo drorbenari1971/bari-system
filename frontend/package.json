@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:pages": "vite build --mode pages",
+    "deploy:pages": "node scripts/deploy-pages.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

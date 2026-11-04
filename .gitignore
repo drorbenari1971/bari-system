@@ -2,3 +2,4 @@ node_modules/
 frontend/dist/
 backend/.env
 backend/data/
+frontend/dist-pages/

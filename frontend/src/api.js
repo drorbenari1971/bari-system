@@ -1,4 +1,11 @@
+// GitHub Pages build (vite --mode pages): no server exists, so requests go to the in-browser demo.
+export const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === 'true';
+
 async function request(method, url, body) {
+  if (STATIC_DEMO) {
+    const { mockRequest } = await import('./demo/mockApi.js');
+    return mockRequest(method, url, body);
+  }
   const res = await fetch(`/api${url}`, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,

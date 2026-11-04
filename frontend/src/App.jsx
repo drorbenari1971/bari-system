@@ -7,7 +7,7 @@ import CalendarPage from './pages/CalendarPage.jsx';
 import Analytics from './pages/Analytics.jsx';
 import Engagement from './pages/Engagement.jsx';
 import Tasks from './pages/Tasks.jsx';
-import { api } from './api.js';
+import { api, STATIC_DEMO } from './api.js';
 
 const StatusContext = createContext({ status: null, refreshStatus: () => {} });
 export const useStatus = () => useContext(StatusContext);
@@ -47,6 +47,11 @@ export default function App() {
         <Sidebar />
         <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
           <div className="mx-auto max-w-7xl">
+            {STATIC_DEMO && (
+              <div className="mb-5 rounded-xl border border-honey/30 bg-amber-50/70 px-3 py-2 text-sm text-amber-900">
+                גרסת הדגמה: כל הנתונים לדוגמה ונשמרים רק בדפדפן שלך. שום דבר לא מתפרסם בפייסבוק או באינסטגרם.
+              </div>
+            )}
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/generator" element={<ContentGenerator />} />
