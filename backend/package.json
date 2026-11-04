@@ -1,0 +1,23 @@
+{
+  "name": "bari-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bari (בריא) social marketing automation - API server, SQLite DB, scheduler and integrations",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "init-db": "node init-db.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.136.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3",
+    "sharp": "^0.33.5"
+  }
+}
