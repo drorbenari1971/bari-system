@@ -91,6 +91,20 @@ CREATE TABLE IF NOT EXISTS comment_replies (
   created_at  TEXT NOT NULL DEFAULT ${NOW}
 );
 
+-- Finance: income and expenses. Money is stored in agorot (integers) to keep sums exact.
+CREATE TABLE IF NOT EXISTS transactions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind          TEXT NOT NULL CHECK (kind IN ('income', 'expense')),
+  date          TEXT NOT NULL,                   -- YYYY-MM-DD
+  category      TEXT NOT NULL,                   -- income: product or classification; expense: expense type
+  subcategory   TEXT NOT NULL DEFAULT '',        -- expense classification (optional)
+  amount_agorot INTEGER NOT NULL CHECK (amount_agorot > 0),
+  is_demo       INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL DEFAULT ${NOW},
+  updated_at    TEXT NOT NULL DEFAULT ${NOW}
+);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+
 CREATE TABLE IF NOT EXISTS insights (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   summary    TEXT NOT NULL DEFAULT '',

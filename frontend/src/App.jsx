@@ -7,6 +7,7 @@ import CalendarPage from './pages/CalendarPage.jsx';
 import Analytics from './pages/Analytics.jsx';
 import Engagement from './pages/Engagement.jsx';
 import Tasks from './pages/Tasks.jsx';
+import Finance from './pages/Finance.jsx';
 import { api, STATIC_DEMO } from './api.js';
 
 const StatusContext = createContext({ status: null, refreshStatus: () => {} });
@@ -59,6 +60,7 @@ export default function App() {
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/engagement" element={<Engagement />} />
               <Route path="/tasks" element={<Tasks />} />
+              <Route path="/finance" element={<Finance />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

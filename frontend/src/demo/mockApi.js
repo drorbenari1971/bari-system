@@ -72,8 +72,35 @@ const DEMO_TASKS = [
   ['קמפיין חורף – מארז צירים', 'בריף, תקציב ולו"ז', 'done', 'medium', -3],
 ];
 
+const DEMO_INCOME = [['ציר עצמות', 14200, 4], ['ציר עוף', 9800, 9], ['גהי', 7600, 15], ['טאלו', 3400, 22]];
+const DEMO_EXPENSES = [
+  ['חומרי גלם', 'בשר ועצמות', 9800, 3], ['חומרי גלם', 'צנצנות ואריזות', 2100, 6], ['שליחויות', 'חברת משלוחים', 2600, 28],
+  ['חשמל', '', 1450, 12], ['מים', '', 380, 14], ['מערכות טכנולוגיות', 'אתר וחנות', 690, 1], ['מנויים', 'כלי שיווק', 320, 2],
+];
+const DEMO_MONTH_FACTORS = [0.82, 0.9, 1, 0.94, 1.12, 1.06]; // oldest to newest
+
+function seedFinance(db) {
+  db.transactions = [];
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  DEMO_MONTH_FACTORS.forEach((factor, i) => {
+    const month = new Date(now.getFullYear(), now.getMonth() - (DEMO_MONTH_FACTORS.length - 1 - i), 1);
+    const dateOn = (day) => `${month.getFullYear()}-${pad(month.getMonth() + 1)}-${pad(day)}`;
+    const add = (kind, category, subcategory, base, day) => {
+      if (dateOn(day) > today) return;
+      db.transactions.push({
+        id: db.nextId++, kind, date: dateOn(day), category, subcategory,
+        amount_agorot: Math.round(base * factor) * 100, is_demo: true, created_at: nowIso(),
+      });
+    };
+    for (const [category, base, day] of DEMO_INCOME) add('income', category, '', base, day);
+    for (const [category, subcategory, base, day] of DEMO_EXPENSES) add('expense', category, subcategory, base, day);
+  });
+}
+
 function seed() {
-  const db = { nextId: 1, posts: [], tasks: [], comments: [], insights: [] };
+  const db = { nextId: 1, posts: [], tasks: [], comments: [], insights: [], transactions: [] };
   const id = () => db.nextId++;
   DEMO_POSTS.forEach((p, i) => {
     const published = iso((DEMO_POSTS.length - i) * 3.5 * DAY - 8 * HOUR);
@@ -101,6 +128,7 @@ function seed() {
       due_date: new Date(Date.now() + dueIn * DAY).toISOString().slice(0, 10), created_at: nowIso(),
     });
   });
+  seedFinance(db);
   return db;
 }
 
@@ -111,6 +139,7 @@ function load() {
   if (memory) return memory;
   try { memory = JSON.parse(localStorage.getItem(STORE_KEY)); } catch { memory = null; }
   if (!memory) { memory = seed(); save(); }
+  if (!memory.transactions) { seedFinance(memory); save(); } // visitors from before the finance module
   return memory;
 }
 function save() {
@@ -190,13 +219,26 @@ const statusRank = { in_progress: 0, todo: 1, done: 2 };
 
 // ---------- routes ----------
 
-const SYNC_SKIPPED = { skipped: true, reason: 'גרסת הדגמה בדפדפן – אין חיבור ל-Meta', metrics: 0, newComments: 0 };
+function parseTransaction({ kind, date, category, subcategory = '', amount_agorot: amount }) {
+  if (!['income', 'expense'].includes(kind)) fail('יש לבחור הכנסה או הוצאה');
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? new Date(`${date}T00:00:00Z`) : null;
+  if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) fail('תאריך לא תקין');
+  const cat = String(category ?? '').trim();
+  const sub = kind === 'expense' ? String(subcategory ?? '').trim() : '';
+  if (!cat) fail(kind === 'income' ? 'יש לבחור מוצר או סיווג' : 'יש לבחור סוג הוצאה');
+  if (cat.length > 60 || sub.length > 60) fail('עד 60 תווים בכל שדה');
+  if (!Number.isSafeInteger(amount) || amount <= 0) fail('הסכום חייב להיות גדול מאפס');
+  if (amount > 100_000_000_000) fail('הסכום גדול מדי, בדקו שאין טעות הקלדה');
+  return { kind, date, category: cat, subcategory: sub, amount_agorot: amount };
+}
+
+const SYNC_SKIPPED ={ skipped: true, reason: 'גרסת הדגמה בדפדפן – אין חיבור ל-Meta', metrics: 0, newComments: 0 };
 
 const routes = [
   ['GET', /^\/status$/, (db) => ({
     claude: false, images: false, facebook: false, instagram: false, imageHosting: false,
     model: 'claude-opus-5-5',
-    hasDemoData: db.posts.some((p) => p.is_demo) || db.tasks.some((t) => t.is_demo),
+    hasDemoData: db.posts.some((p) => p.is_demo) || db.tasks.some((t) => t.is_demo) || db.transactions.some((t) => t.is_demo),
   })],
   ['GET', /^\/dashboard$/, (db) => {
     const perf = performance(db);
@@ -221,6 +263,29 @@ const routes = [
     db.tasks = db.tasks.filter((t) => !t.is_demo);
     db.comments = db.comments.filter((c) => !c.is_demo && !removed.has(c.post_id));
     db.insights = db.insights.filter((i) => !i.is_demo);
+    db.transactions = db.transactions.filter((t) => !t.is_demo);
+    return { ok: true };
+  }],
+
+  // finance (same rules as backend/routes/finance.js)
+  ['GET', /^\/finance\/transactions$/, (db, _m, _b, q) => db.transactions
+    .filter((t) => (!q.get('from') || t.date >= q.get('from')) && (!q.get('to') || t.date <= q.get('to')) && (!q.get('kind') || t.kind === q.get('kind')))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)],
+  ['POST', /^\/finance\/transactions$/, (db, _m, body) => {
+    const row = { id: db.nextId++, ...parseTransaction(body), is_demo: false, created_at: nowIso() };
+    db.transactions.push(row);
+    return row;
+  }],
+  ['PUT', /^\/finance\/transactions\/(\d+)$/, (db, [, id], body) => {
+    const row = db.transactions.find((t) => t.id === Number(id)) ?? fail('הרשומה לא נמצאה');
+    return Object.assign(row, parseTransaction({ ...row, ...body }));
+  }],
+  ['DELETE', /^\/finance\/transactions\/(\d+)$/, (db, [, id]) => {
+    db.transactions = db.transactions.filter((t) => t.id !== Number(id));
+    return { ok: true };
+  }],
+  ['DELETE', /^\/finance\/demo$/, (db) => {
+    db.transactions = db.transactions.filter((t) => !t.is_demo);
     return { ok: true };
   }],
 

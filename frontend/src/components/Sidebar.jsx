@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Sparkles, CalendarDays, BarChart3, MessageCircle, ListChecks, Leaf, Trash2, Moon, Sun } from 'lucide-react';
+import { LayoutDashboard, Sparkles, CalendarDays, BarChart3, MessageCircle, ListChecks, Leaf, Trash2, Moon, Sun, Wallet } from 'lucide-react';
 import { useStatus, useTheme } from '../App.jsx';
 import { api } from '../api.js';
 
@@ -10,6 +10,7 @@ const NAV = [
   { to: '/analytics', label: 'אנליטיקס ותובנות', icon: BarChart3 },
   { to: '/engagement', label: 'תגובות ומעורבות', icon: MessageCircle },
   { to: '/tasks', label: 'ניהול משימות', icon: ListChecks },
+  { to: '/finance', label: 'כספים ותזרים', icon: Wallet },
 ];
 
 // Palettes per mode (see index.css); id '' is the default. Swatch = background / accent.

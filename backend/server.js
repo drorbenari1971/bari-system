@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { db, hydratePost, MEDIA_DIR } from './db.js';
-import { seedDemoIfEmpty, clearDemoData } from './seed.js';
+import { seedDemoIfEmpty, seedFinanceDemoIfEmpty, clearDemoData } from './seed.js';
 import { startScheduler } from './scheduler.js';
 import { claudeConfigured } from './services/claude.js';
 import { imagesConfigured } from './services/images.js';
@@ -14,8 +14,12 @@ import tasksRouter from './routes/tasks.js';
 import analyticsRouter, { postPerformance } from './routes/analytics.js';
 import engagementRouter from './routes/engagement.js';
 import webhooksRouter from './routes/webhooks.js';
+import financeRouter from './routes/finance.js';
 
-if (env('SEED_DEMO', 'true') === 'true') seedDemoIfEmpty();
+if (env('SEED_DEMO', 'true') === 'true') {
+  seedDemoIfEmpty();
+  seedFinanceDemoIfEmpty();
+}
 
 const app = express();
 
@@ -44,7 +48,7 @@ app.get('/api/status', (req, res) => {
     instagram: igConfigured(),
     imageHosting: cloudinaryConfigured(),
     model: env('CLAUDE_MODEL', 'claude-opus-5-5'),
-    hasDemoData: db.prepare('SELECT (SELECT COUNT(*) FROM posts WHERE is_demo = 1) + (SELECT COUNT(*) FROM tasks WHERE is_demo = 1) AS n').get().n > 0,
+    hasDemoData: db.prepare('SELECT (SELECT COUNT(*) FROM posts WHERE is_demo = 1) + (SELECT COUNT(*) FROM tasks WHERE is_demo = 1) + (SELECT COUNT(*) FROM transactions WHERE is_demo = 1) AS n').get().n > 0,
   });
 });
 
@@ -81,6 +85,7 @@ app.use('/api/posts', postsRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/engagement', engagementRouter);
+app.use('/api/finance', financeRouter);
 app.use('/webhooks', webhooksRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'נתיב API לא קיים' }));

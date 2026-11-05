@@ -85,6 +85,35 @@ export function seedDemoIfEmpty() {
   return true;
 }
 
+const DEMO_INCOME = [['ציר עצמות', 14200, 4], ['ציר עוף', 9800, 9], ['גהי', 7600, 15], ['טאלו', 3400, 22]];
+const DEMO_EXPENSES = [
+  ['חומרי גלם', 'בשר ועצמות', 9800, 3], ['חומרי גלם', 'צנצנות ואריזות', 2100, 6], ['שליחויות', 'חברת משלוחים', 2600, 28],
+  ['חשמל', '', 1450, 12], ['מים', '', 380, 14], ['מערכות טכנולוגיות', 'אתר וחנות', 690, 1], ['מנויים', 'כלי שיווק', 320, 2],
+];
+const DEMO_MONTH_FACTORS = [0.82, 0.9, 1, 0.94, 1.12, 1.06]; // oldest to newest
+
+// Six months of sample income and expenses. Runs while the other demo data is still present,
+// so it also reaches databases created before this module existed, and stays gone once cleared.
+export function seedFinanceDemoIfEmpty() {
+  const count = (sql) => db.prepare(sql).get().n;
+  if (count('SELECT COUNT(*) AS n FROM transactions') > 0 || count('SELECT COUNT(*) AS n FROM posts WHERE is_demo = 1') === 0) return false;
+
+  const insert = db.prepare('INSERT INTO transactions (kind, date, category, subcategory, amount_agorot, is_demo) VALUES (?, ?, ?, ?, ?, 1)');
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  DEMO_MONTH_FACTORS.forEach((factor, i) => {
+    const month = new Date(now.getFullYear(), now.getMonth() - (DEMO_MONTH_FACTORS.length - 1 - i), 1);
+    const dateOn = (day) => `${month.getFullYear()}-${pad(month.getMonth() + 1)}-${pad(day)}`;
+    const add = (kind, category, subcategory, base, day) => {
+      if (dateOn(day) <= today) insert.run(kind, dateOn(day), category, subcategory, Math.round(base * factor) * 100);
+    };
+    for (const [category, base, day] of DEMO_INCOME) add('income', category, '', base, day);
+    for (const [category, subcategory, base, day] of DEMO_EXPENSES) add('expense', category, subcategory, base, day);
+  });
+  return true;
+}
+
 export function clearDemoData() {
   const files = db.prepare('SELECT image_feed, image_story FROM posts WHERE is_demo = 1').all();
   db.exec(`
@@ -92,6 +121,7 @@ export function clearDemoData() {
     DELETE FROM posts WHERE is_demo = 1;
     DELETE FROM tasks WHERE is_demo = 1;
     DELETE FROM insights WHERE is_demo = 1;
+    DELETE FROM transactions WHERE is_demo = 1;
   `);
   return files.flatMap((f) => [f.image_feed, f.image_story]).filter(Boolean);
 }
