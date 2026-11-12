@@ -3,9 +3,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { BACKEND_DIR } from './config.js';
+import { BACKEND_DIR, env } from './config.js';
 
-export const DATA_DIR = path.join(BACKEND_DIR, 'data');
+// BARI_DATA_DIR lets tests run against a separate copy instead of the real data.
+export const DATA_DIR = env('BARI_DATA_DIR') || path.join(BACKEND_DIR, 'data');
 export const MEDIA_DIR = path.join(DATA_DIR, 'media');
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
@@ -105,6 +106,46 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 
+-- Instagram leads, synced from Airtable (where Apify collects them). Airtable is the source;
+-- only the outreach status is written back. status_pending = a local change not yet saved there.
+CREATE TABLE IF NOT EXISTS leads (
+  airtable_id    TEXT PRIMARY KEY,
+  handle         TEXT NOT NULL DEFAULT '',
+  display_name   TEXT NOT NULL DEFAULT '',
+  actor_type     TEXT NOT NULL DEFAULT '',
+  profile_url    TEXT NOT NULL DEFAULT '',
+  notes          TEXT NOT NULL DEFAULT '',
+  potential      TEXT NOT NULL DEFAULT '',
+  priority       TEXT NOT NULL DEFAULT '',
+  approach       TEXT NOT NULL DEFAULT '',
+  status         TEXT NOT NULL DEFAULT '',
+  post_count     INTEGER NOT NULL DEFAULT 0,
+  total_likes    INTEGER NOT NULL DEFAULT 0,
+  avg_engagement INTEGER NOT NULL DEFAULT 0,
+  status_pending INTEGER NOT NULL DEFAULT 0,
+  synced_at      TEXT NOT NULL DEFAULT ${NOW}
+);
+
+CREATE TABLE IF NOT EXISTS lead_posts (
+  airtable_id  TEXT PRIMARY KEY,
+  lead_id      TEXT,                             -- leads.airtable_id
+  summary      TEXT NOT NULL DEFAULT '',
+  hashtag      TEXT NOT NULL DEFAULT '',
+  content_type TEXT NOT NULL DEFAULT '',
+  format       TEXT NOT NULL DEFAULT '',
+  likes        INTEGER NOT NULL DEFAULT 0,
+  comments     INTEGER NOT NULL DEFAULT 0,
+  engagement   INTEGER NOT NULL DEFAULT 0,
+  date         TEXT,
+  url          TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_lead_posts_lead ON lead_posts(lead_id);
+
+CREATE TABLE IF NOT EXISTS app_state (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS insights (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   summary    TEXT NOT NULL DEFAULT '',
@@ -113,6 +154,15 @@ CREATE TABLE IF NOT EXISTS insights (
   created_at TEXT NOT NULL DEFAULT ${NOW}
 );
 `);
+
+// Columns added after the first release: CREATE TABLE IF NOT EXISTS doesn't add them to existing databases.
+const addColumn = (table, column, definition) => {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+};
+for (const col of ['platforms', 'facebook_url', 'phone', 'email']) addColumn('leads', col, "TEXT NOT NULL DEFAULT ''");
+addColumn('lead_posts', 'platform', "TEXT NOT NULL DEFAULT ''");
 
 export const nowIso = () => new Date().toISOString();
 

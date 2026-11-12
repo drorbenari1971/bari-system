@@ -99,6 +99,33 @@ function seedFinance(db) {
   });
 }
 
+// Fictional leads only: the real ones come from Airtable and never appear in this public demo.
+const DEMO_SEARCH_TERMS = { instagram: ['ציר_עצמות', 'גהי', 'טאלו'], facebook: ['ציר עצמות', 'גהי', 'טאלו', 'קיטו', 'פליאו'] };
+const LEAD_STATUSES =['לא נוצר קשר', 'נשלחה הודעה', 'בשיחה', 'סגור – עסקה', 'לא מעוניין'];
+const DEMO_LEADS = [
+  ['demo.kitchen.noa', 'המטבח של נועה (דוגמה)', 'בישול ביתי / קיטו-פליאו', 'לקוח פרטי', '3 – נמוכה', 'לא נוצר קשר', 'מבשלת עם גהי בקביעות. להציע קוד הנחה לרכישה ראשונה.', [['קציצות ברוטב עם ציר עצמות', '#ציר_עצמות', 'מתכון / הכנה', 64, 9]]],
+  ['demo.soap.studio', 'סטודיו סבונים (דוגמה)', 'מוצרי טיפוח מטאלו', 'לקוח עסקי (B2B)', '1 – גבוהה', 'נשלחה הודעה', 'מייצרת סבונים מטאלו. להציע טאלו מזוקק במחיר סיטונאי ודוגמה חינם.', [['סבון טאלו ולבנדר', '#טאלו', 'מכירה / מבצע', 41, 6]]],
+  ['demo.nutrition.dana', 'דנה, תזונה (דוגמה)', 'מטפל/ת או תזונה', 'שותף/ה להפניות', '2 – בינונית', 'בשיחה', 'כותבת על ציר עצמות בתזונה. להציע שיתוף פוסט וקוד הנחה למטופלים.', [['למה ציר עצמות בבוקר', '#ציר_עצמות', 'חינוכי / הסבר', 128, 22], ['גהי במטבח היומיומי', '#גהי', 'חינוכי / הסבר', 77, 11]]],
+  ['demo.pizza.bar', 'פיצה בר (דוגמה)', 'עסק מזון / קמעונאי', 'לקוח עסקי (B2B)', '1 – גבוהה', 'לא נוצר קשר', 'משתמשים בגהי בבצק. להציע אספקה קבועה במחיר סיטונאי.', [['פיצה עם גהי בקצוות', '#גהי', 'מכירה / מבצע', 25, 2]]],
+];
+
+function seedLeads(db) {
+  db.leads = DEMO_LEADS.map(([handle, display_name, actor_type, potential, priority, status, approach, posts], i) => {
+    const platforms = ['אינסטגרם', 'אינסטגרם,פייסבוק', 'אינסטגרם', 'פייסבוק'][i] ?? 'אינסטגרם';
+    const leadPosts = posts.map(([summary, hashtag, content_type, likes, comments], j) => ({
+      airtable_id: `demo_post_${i}_${j}`, summary, hashtag, content_type, format: 'תמונה', likes, comments, platform: platforms.split(',')[0],
+      engagement: likes + comments * 3, date: new Date(Date.now() - (i * 40 + j * 9 + 5) * DAY).toISOString().slice(0, 10), url: '',
+    }));
+    return {
+      airtable_id: `demo_lead_${i}`, handle, display_name, actor_type, profile_url: '', notes: '', potential, priority, approach, status,
+      platforms, facebook_url: '', phone: '', email: '',
+      post_count: leadPosts.length, total_likes: leadPosts.reduce((s, p) => s + p.likes, 0),
+      avg_engagement: Math.round(leadPosts.reduce((s, p) => s + p.engagement, 0) / leadPosts.length),
+      status_pending: false, posts: leadPosts,
+    };
+  });
+}
+
 function seed() {
   const db = { nextId: 1, posts: [], tasks: [], comments: [], insights: [], transactions: [] };
   const id = () => db.nextId++;
@@ -129,6 +156,7 @@ function seed() {
     });
   });
   seedFinance(db);
+  seedLeads(db);
   return db;
 }
 
@@ -140,6 +168,7 @@ function load() {
   try { memory = JSON.parse(localStorage.getItem(STORE_KEY)); } catch { memory = null; }
   if (!memory) { memory = seed(); save(); }
   if (!memory.transactions) { seedFinance(memory); save(); } // visitors from before the finance module
+  if (!memory.leads) { seedLeads(memory); save(); } // ...and before the leads screen
   return memory;
 }
 function save() {
@@ -265,6 +294,47 @@ const routes = [
     db.insights = db.insights.filter((i) => !i.is_demo);
     db.transactions = db.transactions.filter((t) => !t.is_demo);
     return { ok: true };
+  }],
+
+  // leads (backend/routes/leads.js syncs these from Airtable; the demo has fictional ones and no sync)
+  ['GET', /^\/leads$/, (db) => ({
+    configured: false, syncedAt: null, syncError: null, statuses: LEAD_STATUSES,
+    choices: {
+      actor_type: ['בישול ביתי / קיטו-פליאו', 'מוצרי טיפוח מטאלו', 'מטפל/ת או תזונה', 'מתחרה ישיר', 'עסק מזון / קמעונאי'],
+      potential: ['לא רלוונטי', 'לקוח עסקי (B2B)', 'לקוח פרטי', 'שותף/ה להפניות', 'שיתוף תוכן'],
+      priority: ['1 – גבוהה', '2 – בינונית', '3 – נמוכה'],
+    },
+    leads: [...db.leads].sort((a, b) => a.priority.localeCompare(b.priority) || b.avg_engagement - a.avg_engagement),
+  })],
+  ['POST', /^\/leads\/sync$/, () => ({ skipped: true, reason: 'גרסת הדגמה בדפדפן – אין חיבור ל-Airtable' })],
+  ['GET', /^\/leads\/search-terms$/, (db) => db.searchTerms ?? DEMO_SEARCH_TERMS],
+  ['PUT', /^\/leads\/search-terms$/, (db, _m, body) => {
+    const clean = (list, platform) => {
+      if (!Array.isArray(list)) fail('רשימה לא תקינה');
+      const words = [...new Set(list.map((t) => String(t ?? '').trim().replace(/^#+/, ''))
+        .map((t) => (platform === 'instagram' ? t.replace(/\s+/g, '_') : t.replace(/\s+/g, ' '))).filter(Boolean))];
+      if (words.some((t) => t.length > 40)) fail('עד 40 תווים למילה');
+      if (words.length > 20) fail('עד 20 מילים לכל פלטפורמה');
+      return words;
+    };
+    db.searchTerms = { instagram: clean(body.instagram, 'instagram'), facebook: clean(body.facebook, 'facebook') };
+    return db.searchTerms;
+  }],
+  ['PUT', /^\/leads\/([\w-]+)\/(actor_type|potential|priority)$/, (db, [, id, field], { value }) => {
+    const lead = db.leads.find((l) => l.airtable_id === id) ?? fail('הליד לא נמצא');
+    lead[field] = String(value ?? '').trim();
+    return { lead };
+  }],
+  ['DELETE', /^\/leads\/([\w-]+)\/(actor_type|potential|priority)$/, (db, [, id, field]) => {
+    const lead = db.leads.find((l) => l.airtable_id === id) ?? fail('הליד לא נמצא');
+    lead[field] = '';
+    return { lead };
+  }],
+  ['PUT', /^\/leads\/([\w-]+)\/status$/, (db, [, id], { status }) => {
+    const lead = db.leads.find((l) => l.airtable_id === id) ?? fail('הליד לא נמצא');
+    if (!LEAD_STATUSES.includes(status)) fail('סטטוס לא חוקי');
+    lead.status = status;
+    return { lead, warning: null };
   }],
 
   // finance (same rules as backend/routes/finance.js)

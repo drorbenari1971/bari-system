@@ -126,6 +126,56 @@ ${post ? `כותרת הפוסט: ${post.headline}\nמוצר: ${PRODUCTS[post.pro
   return { ...(await structured({ prompt, schema: REPLY_SCHEMA, effort: 'low', maxTokens: 2000 })), demo: false };
 }
 
+// ---------- lead classification (Apify collection) ----------
+
+// The choices of the matching single-select fields in the Airtable leads base.
+export const LEAD_CHOICES = {
+  actorType: ['מתחרה ישיר', 'מטפל/ת או תזונה', 'בישול ביתי / קיטו-פליאו', 'מוצרי טיפוח מטאלו', 'עסק מזון / קמעונאי'],
+  potential: ['לקוח עסקי (B2B)', 'שותף/ה להפניות', 'שיתוף תוכן', 'לקוח פרטי', 'לא רלוונטי'],
+  priority: ['1 – גבוהה', '2 – בינונית', '3 – נמוכה'],
+  contentType: ['חינוכי / הסבר', 'מכירה / מבצע', 'מתכון / הכנה', 'אישי / חוויה'],
+};
+
+const LEAD_SCHEMA = {
+  type: 'object',
+  properties: {
+    actor_type: { type: 'string', enum: LEAD_CHOICES.actorType },
+    potential: { type: 'string', enum: LEAD_CHOICES.potential },
+    priority: { type: 'string', enum: LEAD_CHOICES.priority },
+    approach: { type: 'string', description: 'איך לפנות: 1–2 משפטים מעשיים בעברית' },
+    posts: {
+      type: 'array',
+      description: 'אותו סדר כמו הפוסטים בקלט',
+      items: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'תקציר של עד 8 מילים בעברית' },
+          content_type: { type: 'string', enum: LEAD_CHOICES.contentType },
+        },
+        required: ['summary', 'content_type'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['actor_type', 'potential', 'priority', 'approach', 'posts'],
+  additionalProperties: false,
+};
+
+// Classifies one account found by the collection, the same way the existing leads were classified.
+export async function classifyLead({ platform, handle, displayName, posts }) {
+  const prompt = `חשבון ${platform} שפרסם על ציר עצמות, גהי או טאלו. סווג אותו כליד עבור "בריא".
+שם החשבון: ${handle}${displayName ? ` (${displayName})` : ''}
+הפוסטים (טקסט, לייקים, תגובות, תאריך):
+${posts.map((p, i) => `${i + 1}. "${p.text.slice(0, 600)}" · ${p.likes} לייקים · ${p.comments} תגובות · ${p.date ?? ''}`).join('\n')}
+
+- סוג שחקן: מי הם. מתחרה ישיר = מוכרים ציר עצמות, גהי או טאלו בעצמם.
+- פוטנציאל: מה הם יכולים להיות עבור בריא.
+- עדיפות: 1 = כדאי לפנות עכשיו (פעילים, רלוונטיים, קהל מתאים), 3 = נמוכה.
+- איך לפנות: הצעה קונקרטית, וציין אם כדאי לבדוק קודם שהחשבון פעיל (פוסט ישן).
+- לכל פוסט: תקציר קצר וסוג תוכן.`;
+  return structured({ prompt, schema: LEAD_SCHEMA, effort: 'low', maxTokens: 4000 });
+}
+
 // ---------- demo content (used when no API key is configured) ----------
 
 function demoPost(product, tone) {

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Sparkles, CalendarDays, BarChart3, MessageCircle, ListChecks, Leaf, Trash2, Moon, Sun, Wallet } from 'lucide-react';
+import { LayoutDashboard, Sparkles, CalendarDays, BarChart3, MessageCircle, ListChecks, Leaf, Trash2, Moon, Sun, Wallet, Users } from 'lucide-react';
 import { useStatus, useTheme } from '../App.jsx';
 import { api } from '../api.js';
 
@@ -10,6 +10,7 @@ const NAV = [
   { to: '/analytics', label: 'אנליטיקס ותובנות', icon: BarChart3 },
   { to: '/engagement', label: 'תגובות ומעורבות', icon: MessageCircle },
   { to: '/tasks', label: 'ניהול משימות', icon: ListChecks },
+  { to: '/leads', label: 'לידים מהרשתות', icon: Users },
   { to: '/finance', label: 'כספים ותזרים', icon: Wallet },
 ];
 
@@ -119,6 +120,7 @@ export default function Sidebar() {
               <Dot on={status.images} label="יצירת תמונות" />
               <Dot on={status.facebook} label="פייסבוק" offLabel="סימולציה" />
               <Dot on={status.instagram && status.imageHosting} label="אינסטגרם" offLabel="סימולציה" />
+              <Dot on={status.airtable} label="Airtable (לידים)" offLabel="לא מחובר" />
             </>
           ) : (
             <div className="text-xs text-red-600">השרת לא זמין</div>

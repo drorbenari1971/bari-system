@@ -15,6 +15,8 @@ import analyticsRouter, { postPerformance } from './routes/analytics.js';
 import engagementRouter from './routes/engagement.js';
 import webhooksRouter from './routes/webhooks.js';
 import financeRouter from './routes/finance.js';
+import leadsRouter from './routes/leads.js';
+import { airtableConfigured } from './services/airtable.js';
 
 if (env('SEED_DEMO', 'true') === 'true') {
   seedDemoIfEmpty();
@@ -47,6 +49,7 @@ app.get('/api/status', (req, res) => {
     facebook: metaConfigured(),
     instagram: igConfigured(),
     imageHosting: cloudinaryConfigured(),
+    airtable: airtableConfigured(),
     model: env('CLAUDE_MODEL', 'claude-opus-5-5'),
     hasDemoData: db.prepare('SELECT (SELECT COUNT(*) FROM posts WHERE is_demo = 1) + (SELECT COUNT(*) FROM tasks WHERE is_demo = 1) + (SELECT COUNT(*) FROM transactions WHERE is_demo = 1) AS n').get().n > 0,
   });
@@ -86,6 +89,7 @@ app.use('/api/tasks', tasksRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/engagement', engagementRouter);
 app.use('/api/finance', financeRouter);
+app.use('/api/leads', leadsRouter);
 app.use('/webhooks', webhooksRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'נתיב API לא קיים' }));

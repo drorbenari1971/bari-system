@@ -5,6 +5,9 @@ import cron from 'node-cron';
 import { db, getPost, hydratePost, updatePost, appendPublishLog, insertMetric, upsertComment, nowIso } from './db.js';
 import { isRemoteId } from './constants.js';
 import * as meta from './services/meta.js';
+import { syncLeads } from './routes/leads.js';
+import { collectLeads } from './collect.js';
+import { apifyConfigured } from './services/apify.js';
 
 export async function publishNow(postId) {
   // Claim the post atomically so the cron tick and a manual click can't double-publish.
@@ -94,6 +97,20 @@ export function startScheduler() {
     syncFromMeta()
       .then((r) => !r.skipped && console.log(`[sync] metrics=${r.metrics} newComments=${r.newComments}`))
       .catch((e) => console.error('[sync]', e)));
-  console.log('[scheduler] running: publish queue every minute, Meta sync hourly');
+  const leadsSync = () => syncLeads()
+    .then((r) => !r.skipped && console.log(r.ok ? `[leads] accounts=${r.accounts} posts=${r.posts} pushed=${r.pushed}` : `[leads] ${r.error}`))
+    .catch((e) => console.error('[leads]', e));
+  // Every 6 hours: with Apify connected, a full collection (Apify -> Airtable -> system);
+  // otherwise only a sync from Airtable. Server start only syncs, so a restart costs nothing in Apify.
+  cron.schedule('17 */6 * * *', () => {
+    if (!apifyConfigured()) return leadsSync();
+    return collectLeads()
+      .then((r) => console.log(r.ok
+        ? `[collect] new accounts=${r.newAccounts} posts=${r.newPosts} cost=$${r.costUsd}${r.errors.length ? ` errors=${r.errors.length}` : ''}`
+        : `[collect] ${r.reason ?? r.error}`))
+      .catch((e) => console.error('[collect]', e));
+  });
+  console.log('[scheduler] running: publish queue every minute, Meta sync hourly, leads collection every 6 hours');
   runDuePosts().catch(() => {});
+  leadsSync();
 }

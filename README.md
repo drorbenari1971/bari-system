@@ -1,6 +1,6 @@
 # בריא · מערכת שיווק ואוטומציה לסושיאל
 
-מערכת מקומית אחת (Node.js + React + SQLite) לניהול השיווק של "בריא": יצירת פוסטים עם Claude, יצירת תמונות, לוח תוכן ופרסום אוטומטי לפייסבוק ולאינסטגרם, אנליטיקס עם תובנות AI, תיבת תגובות מאוחדת, ניהול משימות, וכספים ותזרים (הכנסות, הוצאות ורווחיות).
+מערכת מקומית אחת (Node.js + React + SQLite) לניהול השיווק של "בריא": יצירת פוסטים עם Claude, יצירת תמונות, לוח תוכן ופרסום אוטומטי לפייסבוק ולאינסטגרם, אנליטיקס עם תובנות AI, תיבת תגובות מאוחדת, ניהול משימות, לידים מאינסטגרם (מסונכרנים מ-Airtable), וכספים ותזרים (הכנסות, הוצאות ורווחיות).
 
 **הדגמה באתר:** https://drorbenari1971.github.io/bari-system/
 
@@ -31,6 +31,8 @@ npm run deploy:pages
 | `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN` | פרסום לעמוד הפייסבוק, משיכת מדדים ותגובות ומענה לתגובות |
 | `META_IG_USER_ID` | חשבון האינסטגרם העסקי שמחובר לעמוד |
 | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | **נדרש לאינסטגרם**: אינסטגרם מוריד תמונות רק מכתובת ציבורית. בזמן הפרסום התמונות עולות ל-Cloudinary כ-JPEG, והמערכת עצמה לא נחשפת לאינטרנט. הערכים נמצאים בלוח הבקרה של Cloudinary |
+| `AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID`, `AIRTABLE_ACCOUNTS_TABLE`, `AIRTABLE_POSTS_TABLE` | לידים מאינסטגרם. מפתח גישה מ-airtable.com/create/tokens עם `data.records:read` ו-`data.records:write`, וגישה לבסיס הלידים בלבד. המזהים לקוחים מכתובת הטבלה ב-Airtable |
+| `APIFY_TOKEN`, `APIFY_INSTAGRAM_RESULTS`, `APIFY_FACEBOOK_RESULTS`, `APIFY_MAX_USD_PER_RUN` | איסוף לידים אוטומטי כל 6 שעות לפי מילות החיפוש במסך הלידים. המפתח נמצא ב-console.apify.com, תחת Settings ← API & Integrations. כל איסוף עולה כסף ב-Apify |
 | `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` | Webhooks לתגובות בזמן אמת. לא בשימוש בהגדרה הרגילה, כי הם דורשים כתובת ציבורית למערכת, והמערכת עצמה אינה מוגנת בהתחברות. תגובות מגיעות בסנכרון השעתי או בלחיצה על "משוך תגובות חדשות" |
 
 אחרי כל שינוי ב-`.env` צריך להפעיל מחדש את `start.bat`.
