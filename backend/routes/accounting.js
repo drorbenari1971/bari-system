@@ -11,6 +11,7 @@ import { kick } from '../accounting/worker.js';
 import * as sync from '../accounting/sync.js';
 import * as flags from '../accounting/flags.js';
 import * as customers from '../accounting/customersQuery.js';
+import { dashboard } from '../accounting/bi.js';
 import { CUSTOMER_SYNC_MINUTES } from '../accounting/polling.js';
 import { AccountingError } from '../accounting/errors.js';
 
@@ -145,6 +146,12 @@ router.get('/customers/export.csv', wrap(async (req, res) => {
 }));
 
 router.get('/customers/:id', wrap(async (req, res) => res.json(customers.getCustomerCard(idParam(req)))));
+
+// Business dashboard (stage 5).
+router.get('/bi/dashboard', wrap(async (req, res) => {
+  const { from, to, granularity } = req.query;
+  res.json(dashboard({ from, to, granularity }));
+}));
 
 router.get('/flags', (req, res) => res.json(flags.listFlags()));
 

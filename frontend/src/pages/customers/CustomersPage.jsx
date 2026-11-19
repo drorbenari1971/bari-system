@@ -3,10 +3,12 @@
 import { useSearchParams } from 'react-router-dom';
 import CustomersList from './CustomersList.jsx';
 import CustomerCard from './CustomerCard.jsx';
+import BIDashboard from './BIDashboard.jsx';
 import SyncSettings from './SyncSettings.jsx';
 
 const TABS = [
   { id: 'customers', label: 'לקוחות' },
+  { id: 'dashboard', label: 'דשבורד' },
   { id: 'settings', label: 'סנכרון והגדרות' },
 ];
 
@@ -30,6 +32,7 @@ export default function CustomersPage() {
         </div>
       </div>
       {tab === 'settings' && <SyncSettings />}
+      {tab === 'dashboard' && <BIDashboard onOpenCustomer={(id) => go({ customer: String(id) })} />}
       {tab === 'customers' && (customerId
         ? <CustomerCard id={customerId} onBack={() => go({})} />
         : <CustomersList onOpen={(id) => go({ customer: String(id) })} />)}

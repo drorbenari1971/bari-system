@@ -2,7 +2,7 @@
 // (Pages serves static files, so there is no server, database or scheduler).
 // Mirrors backend/routes/*, seed.js and the demo content in services/claude.js.
 // All data lives in this visitor's localStorage; nothing leaves the browser.
-import { demoCustomers, demoCustomerCard } from './customersDemo.js';
+import { demoCustomers, demoCustomerCard, demoDashboard } from './customersDemo.js';
 
 const STORE_KEY = 'bari-demo-db-v1';
 const DAY = 86_400_000;
@@ -316,6 +316,7 @@ const routes = [
   // customers screen: fictional customers and receipts (demo/customersDemo.js)
   ['GET', /^\/accounting\/customers$/, (db, m, body, params) => demoCustomers(params)],
   ['GET', /^\/accounting\/customers\/(\d+)$/, (db, m) => demoCustomerCard(m[1]) ?? fail('הלקוח לא נמצא')],
+  ['GET', /^\/accounting\/bi\/dashboard$/, (db, m, body, params) => demoDashboard(params)],
 
   // leads (backend/routes/leads.js syncs these from Airtable; the demo has fictional ones and no sync)
   ['GET', /^\/leads$/, (db) => ({
