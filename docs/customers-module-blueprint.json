@@ -1,0 +1,853 @@
+{
+  "$comment": "Blueprint of the Morning -> customers module automation, generated from the code in backend/accounting. Contains no secrets, tunnel addresses, tokens or customer data.",
+  "blueprint": {
+    "name": "בריא - ניהול לקוחות: סנכרון Morning",
+    "version": "1.1",
+    "generatedAt": "2026-11-19",
+    "sourceCommit": "115f5cb",
+    "branch": "main",
+    "design": "docs/customers-module-design.md",
+    "summary": "סנכרון לקוחות ומסמכים (קבלות/חשבוניות) מ-Morning למערכת המקומית. ה-API Pull הוא מקור האמת, ו-Webhook הוא רק טריגר מזרז. כל העבודה עוברת דרך תור משימות פנימי, עם ניסיונות חוזרים, מניעת כפילויות ו-Audit Log. בנוסף: טופס \"הזמנה חדשה\" שקולט לקוח ומפיק קבלה ב-Morning, עם הגנה מקבלה כפולה."
+  },
+  "runtime": {
+    "process": "שרת Node אחד (backend/server.js), שמפעיל את המודול דרך startAccounting()",
+    "nodeVersion": ">=22.13 (node:sqlite)",
+    "database": "SQLite: backend/data/bari.db (לא נכנס ל-git)",
+    "appListener": {
+      "host": "127.0.0.1",
+      "port": 4000,
+      "exposure": "מקומי בלבד: בקשה עם Host/Origin שאינו localhost נדחית ב-403"
+    },
+    "webhookListener": {
+      "host": "127.0.0.1",
+      "port": "WEBHOOK_PORT (ברירת מחדל 4100)",
+      "exposure": "רק דרך המנהרה",
+      "file": "backend/accounting/webhookReceiver.js"
+    },
+    "tunnel": {
+      "tool": "ngrok",
+      "endpointName": "bari-webhooks",
+      "upstream": "http://127.0.0.1:4100",
+      "configLocation": "%LOCALAPPDATA%\\ngrok\\ngrok.yml (מקומי; הכתובת והטוקן לא בפרויקט)",
+      "startedBy": "start.bat, אם ngrok מותקן ועדיין לא רץ"
+    },
+    "startup": [
+      "startWorker(): שחרור משימות שנתקעו בעיבוד, ואז מחזור כל 2 שניות",
+      "startPolling(): בדיקת תזמון כל 60 שניות",
+      "startWebhookReceiver(): מאזין Webhooks וניקוי ארכיון כל שעה",
+      "בדיקת בריאות Webhook והתראה בלוג כל 60 שניות"
+    ]
+  },
+  "provider": {
+    "id": "morning",
+    "label": "Morning (חשבונית ירוקה)",
+    "spec": "https://developers.morning.co/docs/openapi.bundled.json (v2.0.0)",
+    "environments": {
+      "production": {
+        "auth": "https://api.morning.co",
+        "api": "https://api.greeninvoice.co.il/api/v1"
+      },
+      "sandbox": {
+        "auth": "https://api.sandbox.morning.dev",
+        "api": "https://sandbox.d.greeninvoice.co.il/api/v1"
+      }
+    },
+    "capabilities": {
+      "issuesReceipts": true,
+      "webhooks": true,
+      "lineItems": true,
+      "pdfLinks": true,
+      "updatedSinceFilter": false,
+      "documentUpdateEvents": false
+    },
+    "auth": {
+      "flow": "OAuth client_credentials",
+      "request": "POST {auth}/idp/v1/oauth/token { grant_type, client_id, client_secret }",
+      "tokenLifetime": "שעה (expiresAt)",
+      "cache": "לפי סביבה ו-clientId; חידוש דקה לפני התפוגה",
+      "credentialsStorage": "acc_connections.credentials_enc, מוצפן AES-256-GCM במפתח ACCOUNTING_SECRET_KEY"
+    },
+    "calls": [
+      {
+        "name": "listCustomers",
+        "request": "POST /clients/search { page, pageSize: 100 }",
+        "use": "סנכרון לקוחות"
+      },
+      {
+        "name": "getCustomer",
+        "request": "GET /clients/{id}",
+        "use": "fetch_customer (Webhook)",
+        "notFound": "null"
+      },
+      {
+        "name": "listDocuments",
+        "request": "POST /documents/search { page, pageSize: 100, sort: 'documentDate' }",
+        "use": "סנכרון מסמכים (כולל שורות ותשלומים)"
+      },
+      {
+        "name": "getDocument",
+        "request": "GET /documents/{id}",
+        "use": "fetch_document (כולל linkedDocuments)",
+        "notFound": "null"
+      },
+      {
+        "name": "testConnection",
+        "request": "טוקן חדש + POST /documents/search { page: 1, pageSize: 1 }",
+        "use": "בדיקת חיבור"
+      },
+      {
+        "name": "listItems",
+        "request": "POST /items/search",
+        "use": "קטלוג המוצרים לטופס (cache של 5 דקות)"
+      },
+      {
+        "name": "createCustomer",
+        "request": "POST /clients (send: false, בלי פרטי בנק)",
+        "use": "כרטיס לקוח ללקוח חדש",
+        "creates": true
+      },
+      {
+        "name": "previewReceipt",
+        "request": "POST /documents/preview",
+        "use": "תצוגה מקדימה (PDF ב-base64) בלי ליצור כלום"
+      },
+      {
+        "name": "createReceipt",
+        "request": "POST /documents { type: 400, vatType: 0, lang: he }",
+        "use": "הפקת הקבלה",
+        "creates": true
+      },
+      {
+        "name": "findReceipts",
+        "request": "POST /documents/search { type: [400], clientId, fromDate, toDate }",
+        "use": "בדיקת הזמנה לא ודאית"
+      }
+    ],
+    "httpPolicy": {
+      "timeoutMs": 30000,
+      "retryInsideRequestMs": [
+        1000,
+        3000,
+        9000
+      ],
+      "retryOn": [
+        "429",
+        "5xx",
+        "שגיאת רשת"
+      ],
+      "honorsRetryAfter": true,
+      "on401": "חידוש טוקן פעם אחת וחזרה על הבקשה",
+      "errorCodes": {
+        "401": "auth_failed",
+        "403": "forbidden",
+        "404": "not_found",
+        "429": "rate_limited",
+        "5xx": "server_error",
+        "4xx": "request_error",
+        "network": "network"
+      },
+      "createCalls": "קריאה שיוצרת (creates: true) לא חוזרת על עצמה אחרי תקלת רשת, timeout או 5xx, ומסומנת err.uncertain; חוזרת רק אחרי 401 או 429, שמוכיחים שלא נוצר כלום"
+    }
+  },
+  "triggers": [
+    {
+      "id": "initial_sync",
+      "type": "schedule",
+      "when": "החיבור במצב ok ועדיין אין ריצת סנכרון",
+      "enqueues": "customers_sync",
+      "source": "system"
+    },
+    {
+      "id": "periodic_sync",
+      "type": "schedule",
+      "checkEverySeconds": 60,
+      "intervalMinutes": {
+        "options": [
+          15,
+          60,
+          360
+        ],
+        "default": 60,
+        "setting": "acc_connections.settings.customerSyncMinutes"
+      },
+      "conditions": [
+        "flags.polling",
+        "flags.autoSync",
+        "החיבור מופעל ובמצב ok",
+        "אין ריצה פעילה"
+      ],
+      "enqueues": "customers_sync",
+      "source": "polling"
+    },
+    {
+      "id": "manual_sync",
+      "type": "button",
+      "where": "ניהול לקוחות ← סנכרון והגדרות ← סנכרן עכשיו",
+      "api": "POST /api/accounting/connections/:id/sync",
+      "conditions": [
+        "החיבור מופעל (המתגים לא חוסמים סנכרון ידני)"
+      ],
+      "enqueues": "customers_sync",
+      "source": "manual"
+    },
+    {
+      "id": "morning_webhook",
+      "type": "webhook",
+      "route": "POST /<provider>/<url-token> במאזין הנפרד",
+      "activeTopics": [
+        "client/created"
+      ],
+      "recognisedButInactive": [
+        "document/created"
+      ],
+      "enqueues": "fetch_customer { externalId }",
+      "dedupeKey": "fetch_customer:<connection>:<externalId>",
+      "source": "webhook",
+      "conditions": [
+        "flags.webhooks (WEBHOOKS_ENABLED, ברירת מחדל: כבוי)",
+        "חתימה תקינה",
+        "החיבור מופעל"
+      ]
+    },
+    {
+      "id": "replay",
+      "type": "button",
+      "where": "כרטיס ה-Webhook ← שליחות אחרונות ← הרץ שוב",
+      "api": "POST /api/accounting/webhook-deliveries/:id/replay",
+      "enqueues": "אותה משימה כמו בשליחה המקורית",
+      "source": "replay"
+    },
+    {
+      "id": "retry_job",
+      "type": "button",
+      "where": "כרטיס הניטור ← נסה שוב עכשיו",
+      "api": "POST /api/accounting/jobs/:id/retry",
+      "effect": "משימה שנכשלה או ממתינה חוזרת ל-pending עם ניסיונות מאופסים"
+    },
+    {
+      "id": "new_order",
+      "type": "button",
+      "where": "ניהול לקוחות ← לקוחות ← \"הזמנה חדשה\", או כרטיס לקוח ← \"הזמנה חדשה ללקוח\"",
+      "api": "POST /api/accounting/orders { connectionId, orderKey, order }",
+      "effect": "כרטיס לקוח (אם צריך) וקבלה ב-Morning, ושמירה מקומית מיד",
+      "source": "manual"
+    }
+  ],
+  "flow": {
+    "description": "שרשרת משימות בתור: לקוחות קודם, ואחריהם מסמכים, כדי שקבלות יתחברו לכרטיסי לקוח קיימים.",
+    "steps": [
+      {
+        "job": "customers_sync",
+        "does": "פותח ריצה (acc_sync_runs.type = customers) ומכניס את דף 1",
+        "next": "customers_page"
+      },
+      {
+        "job": "customers_page",
+        "does": "קורא דף של 100 לקוחות, שומר רק שינויים (content_hash), ומכניס את הדף הבא",
+        "next": "customers_page | customers_finalize"
+      },
+      {
+        "job": "customers_finalize",
+        "does": "מסמן לקוחות שלא הוחזרו (הוסר במקור אחרי 2 ריצות מלאות ברצף), סוגר את הריצה",
+        "next": "documents_sync"
+      },
+      {
+        "job": "documents_sync",
+        "does": "פותח ריצה (type = documents) ומכניס את דף 1",
+        "next": "documents_page"
+      },
+      {
+        "job": "documents_page",
+        "does": "קורא דף של 100 מסמכים עם שורות ותשלומים, מזהה את הלקוח, שומר רק שינויים",
+        "next": "documents_page | documents_finalize"
+      },
+      {
+        "job": "documents_finalize",
+        "does": "סוגר את הריצה (מסמכים לא מסומנים כהוסרו)",
+        "next": null
+      }
+    ],
+    "singleRecordJobs": [
+      {
+        "job": "fetch_customer",
+        "does": "GET /clients/{id} ושמירה; notFound אם Morning לא מכירה את הלקוח"
+      },
+      {
+        "job": "fetch_document",
+        "does": "GET /documents/{id} ושמירה; מוכן ל-document/created"
+      }
+    ],
+    "guards": {
+      "oneRunAtATime": "ריצה פעילה עם משימות חיות חוסמת ריצה חדשה לאותו חיבור וסוג",
+      "supersededRun": "דף או סיום של ריצה ישנה מדולגים כשהתחילה ריצה חדשה יותר",
+      "pageAlreadyDone": "חזרה על דף שכבר עובד (קריסה בין שמירה לסיום) מדולגת",
+      "disabledConnection": "ריצה של חיבור מושבת או מחוק מבוטלת",
+      "badRecord": "רשומה פגומה לא עוצרת את הדף; נספרת ב-failed ונשמרת ב-item_errors (עד 20)",
+      "removalSafety": "סימון הסרה מדולג אם חלק מהלקוחות לא נשמרו, או אם Morning החזירה פחות מ-50% מהלקוחות המוכרים",
+      "authFailure": "שגיאת הרשאה סופית מסמנת את החיבור כ-error, והתזמון נעצר עד בדיקת חיבור מוצלחת"
+    }
+  },
+  "queue": {
+    "table": "acc_jobs",
+    "statuses": [
+      "pending",
+      "processing",
+      "completed",
+      "failed",
+      "retry"
+    ],
+    "priority": {
+      "webhook": 10,
+      "manual": 5,
+      "replay": 5,
+      "polling": 0,
+      "system": 0
+    },
+    "claim": "UPDATE ... RETURNING על המשימה המוכנה עם העדיפות הגבוהה ביותר, ואז הוותיקה ביותר",
+    "worker": {
+      "concurrency": 2,
+      "tickMs": 2000
+    },
+    "retry": {
+      "maxAttempts": 8,
+      "backoffMs": [
+        10000,
+        30000,
+        120000,
+        600000,
+        1800000,
+        3600000
+      ],
+      "honorsProviderRetryAfter": true,
+      "permanentErrors": "נכשלות מיד (למשל הרשאה, משימה בלי מטפל)"
+    },
+    "dedupe": "dedupe_key ייחודי רק בזמן שהמשימה pending/processing/retry",
+    "staleLock": "משימה שתקועה ב-processing יותר מ-5 דקות חוזרת ל-retry (וכולן בעליית השרת)",
+    "cleanup": "משימות completed נמחקות אחרי 30 יום; failed נשמרות עד טיפול"
+  },
+  "mapping": {
+    "customer": {
+      "from": "Morning client",
+      "to": "acc_customer_records (+ customers)",
+      "fields": {
+        "id": "external_id",
+        "name": "name",
+        "phone": "phone",
+        "mobile": "mobile",
+        "emails": "emails",
+        "taxId": "tax_id",
+        "address": "address",
+        "city": "city",
+        "zip": "zip",
+        "country": "country",
+        "contactPerson": "contact_person",
+        "department": "department",
+        "active": "active",
+        "labels": "labels",
+        "remarks": "remarks",
+        "incomeAmount": "income_agorot",
+        "paymentAmount": "payment_agorot",
+        "balanceAmount": "balance_agorot",
+        "creationDate": "source_created_at",
+        "lastUpdateDate": "source_updated_at"
+      },
+      "neverStored": [
+        "bankName",
+        "bankBranch",
+        "bankAccount"
+      ]
+    },
+    "document": {
+      "from": "Morning document",
+      "to": "acc_documents + acc_document_lines + acc_document_payments",
+      "kind": {
+        "10": "quote",
+        "305": "invoice",
+        "320": "invoice_receipt",
+        "330": "credit_note",
+        "400": "receipt",
+        "other": "other"
+      },
+      "status": {
+        "0": "open",
+        "1": "closed",
+        "2": "closed",
+        "3": "cancelling",
+        "4": "cancelled"
+      },
+      "totals": "gross = amountLocal, vat = vatLocal, net = gross - vat (באגורות)",
+      "lines": "income[] -> sku, external_item_id, description, quantity, unit_price, total, product_key",
+      "payments": {
+        "method": {
+          "0": "withholding",
+          "1": "cash",
+          "2": "cheque",
+          "3": "card",
+          "4": "bank_transfer",
+          "5": "paypal",
+          "10": "app",
+          "11": "other"
+        },
+        "app": {
+          "1": "Bit",
+          "2": "Pay",
+          "3": "PayBox",
+          "5": "Google Pay",
+          "6": "Apple Pay"
+        },
+        "privacy": "תיאור תשלום נשמר רק בתשלום באפליקציה; בהעברה בנקאית הוא עלול להכיל מספר חשבון ולכן מוסר, גם מ-raw"
+      },
+      "pdf": "url.he או url.origin"
+    },
+    "money": "כל הסכומים שמורים באגורות (מספר שלם)"
+  },
+  "identity": {
+    "customerRecords": [
+      "מזהה Morning",
+      "טלפון מנורמל"
+    ],
+    "documents": [
+      "כרטיס לקוח (client.id)",
+      "טלפון מנורמל",
+      "מייל",
+      "שם זהה (בלי רווחים מיותרים)",
+      "לקוח חדש"
+    ],
+    "nameRule": "שם בלבד מאחד רק בקבלות (באישור בעל העסק). אם שני לקוחות שונים נושאים את אותו שם, לא מנחשים ונוצר לקוח חדש.",
+    "phoneNormalization": "ספרות בלבד; 972 → 0; מספר נייד/נייח שאיבד את ה-0 מקבל אותו בחזרה",
+    "recordedOn": "acc_documents.customer_match (external_id | phone | email | name | new | none) ו-customer_identities"
+  },
+  "audit": {
+    "table": "acc_audit_log",
+    "fields": [
+      "action",
+      "source",
+      "job_id",
+      "entity_type",
+      "entity_id",
+      "external_id",
+      "before",
+      "after",
+      "changes"
+    ],
+    "actions": [
+      "connection.created",
+      "connection.updated",
+      "connection.deleted",
+      "connection.webhook_secret_created",
+      "connection.webhook_secret_rotated",
+      "connection.webhook_token_rotated",
+      "customer.created",
+      "customer.updated",
+      "customer.deactivated",
+      "customer.reactivated",
+      "customer.identity_linked",
+      "customer.removed_in_source",
+      "customer.restored_in_source",
+      "document.created",
+      "document.updated",
+      "document.cancelled",
+      "flag.changed",
+      "order.created",
+      "order.client_created",
+      "order.issued",
+      "order.failed",
+      "order.uncertain",
+      "order.reconciled"
+    ],
+    "notAudited": "שינוי רק בסכומים שמורנינג מחשבת ללקוח (נגזר ממסמכים, שנרשמים בעצמם)",
+    "neverContains": [
+      "סודות",
+      "טוקנים",
+      "פרטי בנק"
+    ]
+  },
+  "webhook": {
+    "addressAndSecret": {
+      "urlToken": "32 תווי base64url אקראיים; מזהה את נקודת הקצה; נשמר ב-settings.webhook.pathToken; לא סוד",
+      "hmacSecret": "32 תווים אלפא-נומריים אקראיים; נשמר מוצפן; מוצג פעם אחת; לא מוחזר מה-API",
+      "rotation": "החלפת אחד לא משנה את השני"
+    },
+    "verification": "HMAC-SHA256 (hex) על הבתים הגולמיים, בכותרת x-webhook-signature, בהשוואה בזמן קבוע",
+    "limits": {
+      "maxBodyBytes": 1000000,
+      "perIpPerMinute": 60,
+      "globalPerMinute": 300,
+      "blockAfterBadSignatures": 10,
+      "blockMinutes": 10
+    },
+    "responses": {
+      "unknownRouteOrToken": 404,
+      "notPost": 405,
+      "blocked": 403,
+      "rateLimited": 429,
+      "notJson": 415,
+      "tooLarge": 413,
+      "noSecretOrBadSignature": 401,
+      "duplicate": "200 (duplicate)",
+      "flagOffOrConnectionDisabled": "200 (disabled)",
+      "inactiveTopic": "200 (ignored)",
+      "unreadable": "200 (unreadable)",
+      "accepted": "200 (accepted, עם job_id)"
+    },
+    "noRetryInsideRequest": "המאזין לא פונה ל-Morning ולא מנסה שוב בתוך בקשת ה-HTTP; ניסיונות חוזרים רק בתור",
+    "archive": {
+      "table": "acc_webhook_archive",
+      "keeps": [
+        "delivery_id",
+        "topic",
+        "webhook_id",
+        "event_timestamp",
+        "correlation_id",
+        "כותרות נבחרות",
+        "body_sha256",
+        "body_size",
+        "remote_ip",
+        "user_agent",
+        "signature_valid",
+        "outcome",
+        "rejection_reason",
+        "job_id"
+      ],
+      "neverKeeps": [
+        "גוף השליחה",
+        "כותרת החתימה",
+        "cookie"
+      ],
+      "retentionDays": 30
+    },
+    "duplicates": "אינדקס ייחודי (connection_id, delivery_id) לשליחות שהתקבלו + dedupe של המשימה + hash תוכן",
+    "ordering": "לא משנה: כל משימה מושכת את המצב הנוכחי מה-API"
+  },
+  "monitoring": {
+    "webhookHealth": {
+      "failureStreakWarningAt": 3,
+      "morningDisablesAfterFailures": 15,
+      "secretMismatch": "שליחה עם user-agent של Morning שנכשלה בחתימה → תקלה מיד",
+      "missed": "לקוח שנוצר ב-Morning בזמן שה-Webhooks דלקו, נמשך ב-Pull יותר מ-10 דקות אחרי היצירה, ובלי משימת webhook (חלון 48 שעות)",
+      "onPeriods": "נבנות מהיסטוריית flag.changed, כך שכיבוי והדלקה לא מוחקים פספוס",
+      "quietDays": 7,
+      "alert": "במסך, ב-GET /api/accounting/health, ושורה בלוג השרת בכל מעבר לתקלה (בדיקה כל 60 שניות)"
+    },
+    "queueMonitor": "כרטיס ניטור: ספירה לפי מצב, משימות שנכשלו/ממתינות עם השגיאה ו'נסה שוב עכשיו', 10 ריצות סנכרון אחרונות (רענון כל 15 שניות)"
+  },
+  "flags": {
+    "table": "acc_feature_flags",
+    "items": {
+      "webhooks": {
+        "default": false,
+        "env": "WEBHOOKS_ENABLED",
+        "note": "נדלק רק מהמסך; בקובץ .env אפשר רק לנעול כבוי"
+      },
+      "polling": {
+        "default": true,
+        "env": "FEATURE_POLLING"
+      },
+      "autoSync": {
+        "default": true,
+        "env": "FEATURE_AUTO_SYNC"
+      },
+      "biCache": {
+        "default": true,
+        "env": "FEATURE_BI_CACHE"
+      },
+      "liveDashboard": {
+        "default": true,
+        "env": "FEATURE_LIVE_DASHBOARD"
+      }
+    },
+    "audited": "כל שינוי נרשם כ-flag.changed"
+  },
+  "analytics": {
+    "purchase": "קבלה או חשבונית מס/קבלה שלא בוטלה; חשבונית מס מוצגת ולא נספרת; חשבונית זיכוי מקטינה; מבוטל לא נספר",
+    "returningCustomer": "שתי רכישות או יותר",
+    "firstVsRepeat": "כל רכישה היא הראשונה אי-פעם של הלקוח או חוזרת (נקבע על כל ההיסטוריה)",
+    "products": {
+      "source": "שורות פריטים אם קיימות; אחרת התיאור החופשי",
+      "keywords": {
+        "ציר": [
+          "ציר"
+        ],
+        "גהי": [
+          "גהי",
+          "גהיי"
+        ],
+        "ערכה": [
+          "ערכה",
+          "ערכות"
+        ],
+        "טאלו": [
+          "טאלו"
+        ]
+      },
+      "unknown": {
+        "unspecified": "לא מפורט",
+        "none": "ללא תיאור"
+      },
+      "note": "הערכה: קבלה שמזכירה שני מוצרים נספרת בשניהם"
+    },
+    "retention": "חזרו תוך 30/60/90 יום, רק מבין לקוחות שהרכישה הראשונה שלהם ותיקה מספיק; וחציון הימים בין רכישות",
+    "cache": "בזיכרון, עד 30 תשובות, לפי גרסת נתונים (מסמכים, לקוחות, מזהים)",
+    "filters": [
+      "from",
+      "to",
+      "granularity: month | week (שבוע מתחיל ביום ראשון)",
+      "product",
+      "method"
+    ]
+  },
+  "api": {
+    "base": "/api/accounting (מקומי בלבד)",
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/providers",
+        "use": "ספקים ויכולות"
+      },
+      {
+        "method": "GET",
+        "path": "/connections",
+        "use": "חיבורים (בלי סודות)"
+      },
+      {
+        "method": "POST",
+        "path": "/connections",
+        "use": "יצירת חיבור"
+      },
+      {
+        "method": "PUT",
+        "path": "/connections/:id",
+        "use": "עדכון (הגדרה מותרת: customerSyncMinutes)"
+      },
+      {
+        "method": "DELETE",
+        "path": "/connections/:id",
+        "use": "מחיקה (נחסמת אם יש לקוחות או מסמכים)"
+      },
+      {
+        "method": "POST",
+        "path": "/connections/:id/test",
+        "use": "בדיקת חיבור"
+      },
+      {
+        "method": "POST",
+        "path": "/connections/:id/sync",
+        "use": "סנכרון ידני"
+      },
+      {
+        "method": "GET",
+        "path": "/connections/:id/webhook",
+        "use": "כתובת, סטטוס, אזהרות ושליחות"
+      },
+      {
+        "method": "POST",
+        "path": "/connections/:id/webhook/secret",
+        "use": "יצירה/החלפה של סוד (מוחזר פעם אחת)"
+      },
+      {
+        "method": "POST",
+        "path": "/connections/:id/webhook/token",
+        "use": "החלפת כתובת"
+      },
+      {
+        "method": "GET",
+        "path": "/webhook-deliveries",
+        "use": "יומן שליחות (מטא-דאטה)"
+      },
+      {
+        "method": "POST",
+        "path": "/webhook-deliveries/:id/replay",
+        "use": "הרצה חוזרת"
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "use": "תור ובריאות Webhook"
+      },
+      {
+        "method": "GET",
+        "path": "/sync-runs",
+        "use": "ריצות סנכרון ומונים"
+      },
+      {
+        "method": "GET",
+        "path": "/jobs",
+        "use": "התור, עם סינון ומונים"
+      },
+      {
+        "method": "POST",
+        "path": "/jobs/:id/retry",
+        "use": "ניסיון חוזר"
+      },
+      {
+        "method": "GET",
+        "path": "/audit",
+        "use": "Audit Log"
+      },
+      {
+        "method": "GET",
+        "path": "/flags",
+        "use": "מתגים"
+      },
+      {
+        "method": "PUT",
+        "path": "/flags/:key",
+        "use": "שינוי מתג"
+      },
+      {
+        "method": "GET",
+        "path": "/customers",
+        "use": "רשימת לקוחות + סיכום"
+      },
+      {
+        "method": "GET",
+        "path": "/customers/export.csv",
+        "use": "ייצוא ל-Excel"
+      },
+      {
+        "method": "GET",
+        "path": "/customers/:id",
+        "use": "כרטיס לקוח"
+      },
+      {
+        "method": "GET",
+        "path": "/bi/dashboard",
+        "use": "דשבורד"
+      },
+      {
+        "method": "GET",
+        "path": "/orders/catalog",
+        "use": "קטלוג המוצרים מ-Morning"
+      },
+      {
+        "method": "POST",
+        "path": "/orders/preview",
+        "use": "תצוגה מקדימה של הקבלה"
+      },
+      {
+        "method": "POST",
+        "path": "/orders",
+        "use": "הפקה: כרטיס לקוח (אם צריך) וקבלה"
+      },
+      {
+        "method": "GET",
+        "path": "/orders",
+        "use": "הזמנות, עם סינון לפי מצב"
+      },
+      {
+        "method": "GET",
+        "path": "/orders/:id",
+        "use": "הזמנה"
+      },
+      {
+        "method": "POST",
+        "path": "/orders/:id/reconcile",
+        "use": "בדיקה ב-Morning להזמנה לא ודאית"
+      }
+    ]
+  },
+  "screens": {
+    "menu": "ניהול לקוחות",
+    "tabs": {
+      "customers": "מדדים, חיפוש, סינון, מיון, ייצוא, כרטיס לקוח, \"הזמנה חדשה\" והתראה על הזמנות לא ודאיות",
+      "dashboard": "הכנסות, ראשונה מול חוזרת, תשלומים, מוצרים, ימים, שימור, 10 מובילים",
+      "settings": "חיבור, סנכרון, Webhook, ניטור, מתגים, יומן שינויים"
+    }
+  },
+  "storage": {
+    "tables": [
+      "acc_connections",
+      "acc_customer_records",
+      "customers",
+      "customer_identities",
+      "acc_documents",
+      "acc_document_lines",
+      "acc_document_payments",
+      "acc_jobs",
+      "acc_sync_runs",
+      "acc_audit_log",
+      "acc_webhook_archive",
+      "acc_feature_flags",
+      "acc_orders"
+    ],
+    "reservedForLater": [
+      "sales_facts",
+      "sales_fact_lines",
+      "bi_daily",
+      "bi_daily_method",
+      "bi_daily_product",
+      "bi_daily_customer",
+      "bi_customer_stats",
+      "bi_monthly_new_customers",
+      "bi_meta"
+    ]
+  },
+  "configuration": {
+    "env": {
+      "ACCOUNTING_SECRET_KEY": "נוצר אוטומטית בהפעלה הראשונה; מצפין את פרטי החיבור",
+      "WEBHOOK_PORT": "4100",
+      "WEBHOOK_PUBLIC_URL": "הכתובת הציבורית של המנהרה",
+      "WEBHOOKS_ENABLED": "אופציונלי: false נועל את ה-Webhooks כבויים"
+    },
+    "morningSide": {
+      "where": "Morning ← הגדרות ← כלי מפתחים ← Webhooks",
+      "url": "<WEBHOOK_PUBLIC_URL>/morning/<url-token> (מוצג במסך)",
+      "events": [
+        "client/created"
+      ],
+      "secret": "הסוד שנוצר במערכת"
+    }
+  },
+  "tests": {
+    "command": "npm test (בתיקיית backend)",
+    "count": 105,
+    "files": [
+      "accounting-crypto",
+      "accounting-morning-client",
+      "accounting-connections",
+      "accounting-queue",
+      "accounting-audit",
+      "accounting-model",
+      "accounting-sync",
+      "accounting-documents",
+      "accounting-webhooks",
+      "accounting-customers-screen",
+      "accounting-bi",
+      "accounting-orders"
+    ]
+  },
+  "orders": {
+    "file": "backend/accounting/orders.js",
+    "form": "frontend/src/pages/customers/NewOrderForm.jsx",
+    "table": "acc_orders",
+    "steps": [
+      "draft",
+      "client_created",
+      "issuing",
+      "issued",
+      "failed",
+      "uncertain"
+    ],
+    "input": {
+      "customer": "חדש (שם חובה; נייד, מייל, כתובת, עיר, ח.פ/ת.ז, הערות) או קיים (customerId)",
+      "lines": "1 עד 30 שורות: תיאור, כמות, מחיר ליחידה באגורות, itemId מהקטלוג (לא חובה)",
+      "payment": "method: app | bank_transfer | cash | card | other; app: Bit | PayBox | Pay | Google Pay | Apple Pay; תאריך; אסמכתה; amount חייב להיות שווה לסך ההזמנה",
+      "receipt": "תאריך (לא עתידי), תיאור, הערות, sendEmail (רק עם מייל)",
+      "neverAccepted": [
+        "מספר כרטיס אשראי",
+        "פרטי חשבון בנק"
+      ]
+    },
+    "duplicateProtection": [
+      "order_key ייחודי לכל טופס: שליחה חוזרת מחזירה את אותה הזמנה; הזמנה במצב issuing, issued או uncertain לא מופקת שוב",
+      "ההזמנה והשלב נשמרים לפני כל קריאה ל-Morning",
+      "קריאות שיוצרות לא חוזרות אוטומטית; תשובה שאבדה מסמנת את ההזמנה uncertain",
+      "reconcileOrder: מחפש קבלה של אותו לקוח, תאריך וסכום שנוצרה מאז תחילת ההפקה (חלון 10 דקות); נמצאה → issued, לא נמצאה → failed",
+      "כרטיס לקוח שהתשובה עליו אבדה (client_uncertain): בניסיון הבא מחפשים אותו לפי שם ונייד או מייל לפני יצירה"
+    ],
+    "customers": "לקוח חדש נוצר ככרטיס ב-Morning; לקוח קיים בלי כרטיס מקבל כרטיס שמצורף לאותו לקוח מקומי (linkIdentities)",
+    "afterIssue": "הקבלה נמשכת (GET /documents/{id}) ונשמרת מקומית; אם זה נכשל, נכנסת לתור fetch_document",
+    "attention": "הזמנות uncertain מוצגות בראש רשימת הלקוחות עם \"בדיקה ב-Morning\" (OrdersAttention.jsx)",
+    "email": "הקבלה נשלחת במייל רק כשמסמנים; כרטיס חדש נוצר עם send: false"
+  }
+}
