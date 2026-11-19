@@ -40,12 +40,16 @@
  *   Promise<{ items: import('../model.js').CanonicalDocument[], page: number, pageSize: number, total: number, pages: number }>} listDocuments
  *   One page of documents, in a stable order.
  * @property {(conn: Connection, externalId: string) => Promise<import('../model.js').CanonicalDocument|null>} getDocument
+ * Required when capabilities.issuesReceipts is true (see providers/morning/index.js):
+ *   listItems(conn), createCustomer(conn, customer), previewReceipt(conn, order), createReceipt(conn, order),
+ *   findReceipts(conn, { clientId, date }). Create calls mark failures that may have gone through with err.uncertain.
  * @property {object} [webhooks]  required when capabilities.webhooks is true:
  *   { SECRET_LENGTH, KEPT_HEADERS, supportedTopics(), verifySignature(secret, rawBody, signature),
  *     describeDelivery(headers), readDelivery(topic, rawBody) } (see providers/morning/webhooks.js)
  */
 
 const REQUIRED_FUNCTIONS = ['testConnection', 'listCustomers', 'getCustomer', 'listDocuments', 'getDocument'];
+const RECEIPT_FUNCTIONS = ['listItems', 'createCustomer', 'previewReceipt', 'createReceipt', 'findReceipts'];
 const WEBHOOK_FUNCTIONS = ['supportedTopics', 'verifySignature', 'describeDelivery', 'readDelivery'];
 const CAPABILITY_KEYS = ['webhooks', 'lineItems', 'pdfLinks', 'updatedSinceFilter', 'documentUpdateEvents'];
 
@@ -57,6 +61,9 @@ export function assertProvider(p) {
   if (!Array.isArray(p?.credentialFields) || !p.credentialFields.length) problems.push('credentialFields');
   for (const key of CAPABILITY_KEYS) if (typeof p?.capabilities?.[key] !== 'boolean') problems.push(`capabilities.${key}`);
   for (const fn of REQUIRED_FUNCTIONS) if (typeof p?.[fn] !== 'function') problems.push(fn);
+  if (p?.capabilities?.issuesReceipts) {
+    for (const fn of RECEIPT_FUNCTIONS) if (typeof p[fn] !== 'function') problems.push(fn);
+  }
   if (p?.capabilities?.webhooks) {
     for (const fn of WEBHOOK_FUNCTIONS) if (typeof p.webhooks?.[fn] !== 'function') problems.push(`webhooks.${fn}`);
   }

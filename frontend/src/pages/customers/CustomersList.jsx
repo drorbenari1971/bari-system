@@ -1,6 +1,8 @@
 // "לקוחות": headline numbers, search, filters, sorting, Excel export, and the customers table.
 import { useEffect, useState } from 'react';
-import { Users, Repeat, Wallet, UserRound, Search, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, Repeat, Wallet, UserRound, Search, Download, ChevronLeft, ChevronRight, FilePlus2 } from 'lucide-react';
+import NewOrderForm from './NewOrderForm.jsx';
+import OrdersAttention from './OrdersAttention.jsx';
 import { api, STATIC_DEMO } from '../../api.js';
 import { fmtNum } from '../../constants.js';
 import { StatCard, Card, Empty, ErrorNote, Spinner } from '../../components/ui.jsx';
@@ -18,6 +20,8 @@ export default function CustomersList({ onOpen }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [ordering, setOrdering] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const t = setTimeout(() => { setQ(query.trim()); setPage(1); }, SEARCH_DELAY_MS);
@@ -33,7 +37,7 @@ export default function CustomersList({ onOpen }) {
       .catch((e) => alive && setError(e.message))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [q, segment, sort, page]);
+  }, [q, segment, sort, page, refreshKey]);
 
   const s = data?.summary;
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
@@ -41,6 +45,13 @@ export default function CustomersList({ onOpen }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {STATIC_DEMO
+          ? <button className="btn-primary" disabled title="לא זמין בגרסת ההדגמה"><FilePlus2 className="h-4 w-4" /> הזמנה חדשה</button>
+          : <button className="btn-primary" onClick={() => setOrdering(true)}><FilePlus2 className="h-4 w-4" /> הזמנה חדשה</button>}
+      </div>
+      {!STATIC_DEMO && <OrdersAttention refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
+      {!STATIC_DEMO && <NewOrderForm open={ordering} onClose={() => setOrdering(false)} onIssued={() => setRefreshKey((k) => k + 1)} />}
       {s && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard icon={Users} label="לקוחות" value={fmtNum(s.customers)} sub={`${fmtNum(s.buyers)} מהם קנו לפחות פעם אחת`} />

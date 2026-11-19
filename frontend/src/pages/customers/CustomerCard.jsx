@@ -1,8 +1,9 @@
 // Customer card: who the customer is, how they were identified, purchase summary, every document
 // with its payments, the Morning client card (if any) and the change history.
 import { useEffect, useState } from 'react';
-import { ArrowRight, Phone, Mail, FileText, ExternalLink, History, CreditCard, IdCard } from 'lucide-react';
-import { api } from '../../api.js';
+import { ArrowRight, Phone, Mail, FileText, ExternalLink, History, CreditCard, IdCard, FilePlus2 } from 'lucide-react';
+import { api, STATIC_DEMO } from '../../api.js';
+import NewOrderForm from './NewOrderForm.jsx';
 import { fmtNum, fmtDateTime } from '../../constants.js';
 import { Card, Empty, ErrorNote, Spinner } from '../../components/ui.jsx';
 import { IDENTIFIED, MATCH, KINDS, DOC_STATUS, ACTIONS, SOURCES, fmtMoney, fmtDay, methodLabel } from './customerFormat.js';
@@ -20,11 +21,13 @@ function Stat({ label, value, sub }) {
 export default function CustomerCard({ id, onBack }) {
   const [c, setC] = useState(null);
   const [error, setError] = useState(null);
+  const [ordering, setOrdering] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     setC(null);
     api.get(`/accounting/customers/${id}`).then(setC).catch((e) => setError(e.message));
-  }, [id]);
+  }, [id, reloadKey]);
 
   const back = <button className="btn-ghost px-2 py-1.5" onClick={onBack}><ArrowRight className="h-4 w-4" /> חזרה לרשימה</button>;
   if (!c) return <div className="space-y-4">{back}{error ? <ErrorNote error={error} /> : <div className="grid h-40 place-items-center"><Spinner className="h-6 w-6 text-sage-500" /></div>}</div>;
@@ -48,7 +51,16 @@ export default function CustomerCard({ id, onBack }) {
               {!c.phone && !c.email && <span className="text-charcoal-400">אין טלפון או מייל (הקבלות ב-Morning כוללות רק שם)</span>}
             </div>
           </div>
+          {!STATIC_DEMO && <button className="btn-primary" onClick={() => setOrdering(true)}><FilePlus2 className="h-4 w-4" /> הזמנה חדשה ללקוח</button>}
         </div>
+        {!STATIC_DEMO && (
+          <NewOrderForm
+            open={ordering}
+            onClose={() => setOrdering(false)}
+            presetCustomer={{ id: c.id, name: c.name, phone: c.phone, email: c.email, purchases: c.purchases }}
+            onIssued={() => setReloadKey((k) => k + 1)}
+          />
+        )}
         <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Stat label="רכישות" value={fmtNum(c.purchases)} />
           <Stat label="סה״כ" value={fmtMoney(c.total)} />

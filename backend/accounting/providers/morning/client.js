@@ -69,8 +69,13 @@ export class MorningClient {
   /**
    * Calls the data API. Renews the token once on 401; retries rate limits (429), server errors
    * and network failures with growing delays. Throws AccountingError.
+   *
+   * @param {{ creates?: boolean }} [options] creates: the call creates something at Morning (a client,
+   *   a document). Morning offers no idempotency key, so after a network failure or a server error the
+   *   record may already exist: such a call is NOT retried, and its error is marked uncertain
+   *   (err.uncertain). Only answers that prove nothing was created are retried (401, 429).
    */
-  async request(method, path, body) {
+  async request(method, path, body, { creates = false } = {}) {
     let renewed = false;
     for (let attempt = 0; ; attempt++) {
       const accessToken = await this.token();
@@ -78,7 +83,14 @@ export class MorningClient {
       try {
         res = await this.#send(`${this.env.api}${path}`, { method, body, accessToken });
       } catch (err) {
+        if (creates) { err.uncertain = true; throw err; }
         if (attempt < RETRY_DELAYS_MS.length) { await this.sleep(RETRY_DELAYS_MS[attempt]); continue; }
+        throw err;
+      }
+      if (creates && res.status >= 500) {
+        const json = await res.json().catch(() => ({}));
+        const err = apiError(res.status, json);
+        err.uncertain = true;
         throw err;
       }
       if (res.ok) return res.status === 204 ? null : res.json();

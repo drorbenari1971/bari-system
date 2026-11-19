@@ -105,3 +105,57 @@ export function toCanonicalDocument(doc) {
     raw: sanitizedRaw(doc),
   };
 }
+
+// ---- Orders (customer intake + receipt): canonical order -> Morning requests ----
+const PAYMENT_TYPE_BY_METHOD = { cash: 1, cheque: 2, card: 3, bank_transfer: 4, paypal: 5, app: 10, other: 11 };
+const APP_CODE = { Bit: 1, Pay: 2, PayBox: 3, 'Google Pay': 5, 'Apple Pay': 6 };
+const shekels = (agorot) => Math.round(agorot) / 100;
+
+/**
+ * A new Morning client from the order form. Bank details are never sent. `send: false`: Morning
+ * does not email this client automatically; each receipt decides on its own whether to email.
+ */
+export function toMorningClientRequest(c) {
+  const body = { name: c.name, send: false, country: 'IL' };
+  if (c.mobile) body.mobile = c.mobile;
+  if (c.phone) body.phone = c.phone;
+  if (c.email) body.emails = [c.email];
+  for (const k of ['address', 'city', 'taxId', 'remarks']) if (c[k]) body[k] = c[k];
+  return body;
+}
+
+/** The receipt (type 400) for an order. Prices in shekels; VAT follows the business type. */
+export function toMorningReceiptRequest(order) {
+  const p = order.payment;
+  const payment = { date: p.date, type: PAYMENT_TYPE_BY_METHOD[p.method], price: shekels(p.amount), currency: 'ILS' };
+  if (p.method === 'app' && APP_CODE[p.app]) payment.appType = APP_CODE[p.app];
+  if (p.reference && (p.method === 'app' || p.method === 'other' || p.method === 'paypal')) payment.transactionId = p.reference;
+  const client = { id: order.customer.externalId, name: order.customer.name };
+  // The download link goes to these addresses; without them the receipt is not emailed.
+  client.emails = order.receipt.sendEmail && order.customer.email ? [order.customer.email] : [];
+  const body = {
+    type: 400,
+    lang: 'he',
+    currency: 'ILS',
+    vatType: 0,
+    signed: true,
+    date: order.receipt.date,
+    client,
+    income: order.lines.map((l) => ({
+      description: l.description,
+      quantity: l.quantity,
+      price: shekels(l.unitPrice),
+      currency: 'ILS',
+      vatType: 0,
+      ...(l.itemId ? { itemId: l.itemId } : {}),
+      ...(l.sku ? { catalogNum: l.sku } : {}),
+    })),
+    payment: [payment],
+  };
+  if (order.receipt.description) body.description = order.receipt.description;
+  if (order.receipt.remarks) body.remarks = order.receipt.remarks;
+  return body;
+}
+
+/** A catalog item: { id, name, price (agorot), currency }. */
+export const toCatalogItem = (i) => ({ id: text(i.id), name: text(i.name), description: text(i.description), price: toAgorot(i.price), currency: text(i.currency) || 'ILS' });

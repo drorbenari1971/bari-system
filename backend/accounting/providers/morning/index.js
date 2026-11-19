@@ -1,6 +1,8 @@
 // The Morning (Green Invoice) provider.
 import { MorningClient, ENVIRONMENTS } from './client.js';
-import { toCanonicalCustomer, toCanonicalDocument } from './mapper.js';
+import {
+  toCanonicalCustomer, toCanonicalDocument, toMorningClientRequest, toMorningReceiptRequest, toCatalogItem,
+} from './mapper.js';
 import * as webhooks from './webhooks.js';
 
 /** @param {import('../base.js').Connection} conn @param {object} [deps] */
@@ -22,6 +24,7 @@ const morning = {
   // From the official spec: webhooks exist only for creation events; documents have no
   // "last updated" field or filter.
   capabilities: {
+    issuesReceipts: true,
     webhooks: true,
     lineItems: true,
     pdfLinks: true,
@@ -66,6 +69,43 @@ const morning = {
       if (err.code === 'not_found') return null;
       throw err;
     }
+  },
+
+  // ---- Orders: creating clients and receipts (writes to Morning) ----
+
+  /** The product catalog (Morning "items"), all pages. */
+  async listItems(conn, deps) {
+    const client = clientFor(conn, deps);
+    const items = [];
+    for (let page = 1; page <= 20; page++) {
+      const r = await client.request('POST', '/items/search', { page, pageSize: 100 });
+      items.push(...(r?.items ?? []).map(toCatalogItem));
+      if (!r?.pages || page >= r.pages) break;
+    }
+    return items;
+  },
+
+  /** Creates a client card. Never retried after a network or server failure (err.uncertain). */
+  async createCustomer(conn, customer, deps) {
+    return toCanonicalCustomer(await clientFor(conn, deps).request('POST', '/clients', toMorningClientRequest(customer), { creates: true }));
+  },
+
+  /** The receipt as a PDF (base64) without creating anything. */
+  async previewReceipt(conn, order, deps) {
+    const r = await clientFor(conn, deps).request('POST', '/documents/preview', toMorningReceiptRequest(order));
+    return { pdfBase64: r?.file ?? '' };
+  },
+
+  /** Issues the receipt. Never retried after a network or server failure (err.uncertain). */
+  async createReceipt(conn, order, deps) {
+    const r = await clientFor(conn, deps).request('POST', '/documents', toMorningReceiptRequest(order), { creates: true });
+    return { externalId: String(r?.id ?? ''), number: String(r?.number ?? ''), pdfUrl: r?.url?.he ?? r?.url?.origin ?? '' };
+  },
+
+  /** Receipts of a client on a date, to check whether an uncertain issue went through. */
+  async findReceipts(conn, { clientId, date }, deps) {
+    const r = await clientFor(conn, deps).request('POST', '/documents/search', { page: 1, pageSize: 50, type: [400], clientId, fromDate: date, toDate: date });
+    return (r?.items ?? []).map(toCanonicalDocument);
   },
 
   /** One client, or null when Morning no longer has it. */
