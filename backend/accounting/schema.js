@@ -337,3 +337,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_acc_archive_accepted_delivery
   ON acc_webhook_archive(connection_id, delivery_id) WHERE outcome = 'accepted' AND delivery_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_acc_archive_conn ON acc_webhook_archive(connection_id, id);
 `);
+
+// Document sync (stage 2b): how the document's customer was identified, and the provider's client ID.
+addColumns('acc_documents', {
+  type_code: 'INTEGER',
+  customer_external_id: 'TEXT',
+  customer_match: 'TEXT', // external_id | phone | email | name | new | none
+});

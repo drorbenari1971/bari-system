@@ -20,14 +20,19 @@ const ACTION_LABEL = {
   'customer.updated': 'פרטי לקוח עודכנו',
   'customer.deactivated': 'לקוח סומן כלא פעיל',
   'customer.reactivated': 'לקוח חזר להיות פעיל',
-  'customer.identity_linked': 'רשומה צורפה ללקוח קיים (לפי טלפון)',
+  'customer.identity_linked': 'זוהה כלקוח קיים',
   'customer.removed_in_source': 'לקוח הוסר ב-Morning',
   'customer.restored_in_source': 'לקוח חזר ב-Morning',
+  'document.created': 'מסמך חדש',
+  'document.updated': 'מסמך עודכן',
+  'document.cancelled': 'מסמך בוטל',
   'flag.changed': 'מתג שונה',
   'connection.webhook_secret_created': 'נוצר סוד ל-Webhook',
   'connection.webhook_secret_rotated': 'סוד ה-Webhook הוחלף',
   'connection.webhook_token_rotated': 'כתובת ה-Webhook הוחלפה',
 };
+
+const MATCH_LABEL = { external_id: 'כרטיס לקוח', phone: 'טלפון', email: 'מייל', name: 'שם' };
 
 const SOURCE_LABEL = { manual: 'ידני', polling: 'סנכרון תקופתי', system: 'מערכת', webhook: 'Webhook', replay: 'הרצה חוזרת' };
 
@@ -239,6 +244,8 @@ function ChangeHistory({ refreshKey }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{ACTION_LABEL[a.action] ?? a.action}</span>
                 {(a.after?.name ?? a.before?.name) && <span className="text-charcoal-600" dir="auto">{a.after?.name ?? a.before?.name}</span>}
+                {a.entity_type === 'document' && (a.after?.number ?? a.before?.number) && <span className="text-charcoal-500">מס' {a.after?.number ?? a.before?.number}</span>}
+                {a.after?.linkedBy && <span className="chip bg-charcoal-50 text-charcoal-600">לפי {MATCH_LABEL[a.after.linkedBy] ?? a.after.linkedBy}</span>}
                 <span className="text-xs text-charcoal-400">{fmtDateTime(a.at)} · {SOURCE_LABEL[a.source] ?? a.source}</span>
               </div>
               {a.before && a.changes.length > 0 && (
@@ -263,13 +270,13 @@ function CustomerSync({ connection: c, onChanged, onSynced }) {
     try {
       const r = await api.get(`/accounting/sync-runs?connectionId=${c.id}&pageSize=1`);
       setData(r);
-      return r.items[0] ?? null;
+      return r.latest.customers;
     } catch (e) { setError(e.message); return null; }
   }, [c.id]);
   useEffect(() => { load(); }, [load]);
 
-  const run = data?.items[0];
-  const running = run?.status === 'running';
+  const runs = data?.latest ?? {};
+  const running = Object.values(runs).some((r) => r?.status === 'running');
   const busy = !!requested || running;
 
   useEffect(() => {
@@ -292,7 +299,7 @@ function CustomerSync({ connection: c, onChanged, onSynced }) {
     setError(null);
     try {
       await api.post(`/accounting/connections/${c.id}/sync`);
-      setRequested({ at: Date.now(), lastRunId: run?.id ?? null });
+      setRequested({ at: Date.now(), lastRunId: runs.customers?.id ?? null });
     } catch (e) { setError(e.message); }
   };
   const changeInterval = async (e) => {
@@ -303,13 +310,13 @@ function CustomerSync({ connection: c, onChanged, onSynced }) {
     } catch (err) { setError(err.message); }
   };
 
-  const status = RUN_STATUS[run?.status];
   return (
     <div className="mt-4 border-t border-charcoal-100 pt-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Users className="h-4 w-4 text-sage-500" /> סנכרון לקוחות
-          {data && <span className="chip bg-charcoal-50 text-charcoal-600">{data.knownCustomers.toLocaleString('he-IL')} לקוחות</span>}
+          <Users className="h-4 w-4 text-sage-500" /> סנכרון מ-Morning
+          {data && <span className="chip bg-charcoal-50 text-charcoal-600">{data.totalCustomers.toLocaleString('he-IL')} לקוחות</span>}
+          {data && <span className="chip bg-charcoal-50 text-charcoal-600">{data.knownDocuments.toLocaleString('he-IL')} מסמכים</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select className="input w-auto py-1.5 text-sm" value={c.settings.customerSyncMinutes ?? 60} onChange={changeInterval} aria-label="תדירות הסנכרון">
@@ -320,21 +327,32 @@ function CustomerSync({ connection: c, onChanged, onSynced }) {
           </button>
         </div>
       </div>
-      {run ? (
-        <div className="mt-2 text-sm">
-          <span className={status?.cls}>{status?.label ?? run.status}</span>
-          <span className="text-xs text-charcoal-400"> · {fmtDateTime(run.started_at)} · {SOURCE_LABEL[run.source] ?? run.source}</span>
-          <p className="mt-0.5 text-xs text-charcoal-500">
-            נקראו {run.fetched} · נוספו {run.added} · עודכנו {run.updated} · ללא שינוי {run.unchanged}
-            {run.removed > 0 && <> · הוסרו ב-Morning {run.removed}</>}
-            {run.failed > 0 && <span className="text-red-600"> · לא נשמרו {run.failed}</span>}
-          </p>
-          {run.error && <p className={`mt-1 text-xs ${run.status === 'completed' ? 'text-amber-700' : 'text-red-600'}`}>{run.error}</p>}
+      {runs.customers ? (
+        <div className="mt-2 space-y-2">
+          <RunLine title="כרטיסי לקוח" run={runs.customers} />
+          {runs.documents && <RunLine title="מסמכים (קבלות וחשבוניות)" run={runs.documents} />}
         </div>
       ) : data && (
         <p className="mt-2 text-xs text-charcoal-500">עדיין לא בוצע סנכרון. הסנכרון הראשון מתחיל לבד אחרי בדיקת חיבור מוצלחת, או בלחיצה על "סנכרן עכשיו".</p>
       )}
       {error && <div className="mt-2"><ErrorNote error={error} /></div>}
+    </div>
+  );
+}
+
+function RunLine({ title, run }) {
+  const status = RUN_STATUS[run.status];
+  return (
+    <div className="text-sm">
+      <span className="font-medium">{title}: </span>
+      <span className={status?.cls}>{status?.label ?? run.status}</span>
+      <span className="text-xs text-charcoal-400"> · {fmtDateTime(run.started_at)} · {SOURCE_LABEL[run.source] ?? run.source}</span>
+      <p className="mt-0.5 text-xs text-charcoal-500">
+        נקראו {run.fetched} · נוספו {run.added} · עודכנו {run.updated} · ללא שינוי {run.unchanged}
+        {run.removed > 0 && <> · הוסרו ב-Morning {run.removed}</>}
+        {run.failed > 0 && <span className="text-red-600"> · לא נשמרו {run.failed}</span>}
+      </p>
+      {run.error && <p className={`mt-1 text-xs ${run.status === 'completed' ? 'text-amber-700' : 'text-red-600'}`}>{run.error}</p>}
     </div>
   );
 }

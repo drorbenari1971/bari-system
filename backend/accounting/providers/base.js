@@ -36,12 +36,16 @@
  *   One page of customers, in the provider's own order.
  * @property {(conn: Connection, externalId: string) => Promise<import('../model.js').CanonicalCustomer|null>} getCustomer
  *   null when the provider no longer has the customer.
+ * @property {(conn: Connection, opts: { page: number, pageSize: number }) =>
+ *   Promise<{ items: import('../model.js').CanonicalDocument[], page: number, pageSize: number, total: number, pages: number }>} listDocuments
+ *   One page of documents, in a stable order.
+ * @property {(conn: Connection, externalId: string) => Promise<import('../model.js').CanonicalDocument|null>} getDocument
  * @property {object} [webhooks]  required when capabilities.webhooks is true:
  *   { SECRET_LENGTH, KEPT_HEADERS, supportedTopics(), verifySignature(secret, rawBody, signature),
  *     describeDelivery(headers), readDelivery(topic, rawBody) } (see providers/morning/webhooks.js)
  */
 
-const REQUIRED_FUNCTIONS = ['testConnection', 'listCustomers', 'getCustomer'];
+const REQUIRED_FUNCTIONS = ['testConnection', 'listCustomers', 'getCustomer', 'listDocuments', 'getDocument'];
 const WEBHOOK_FUNCTIONS = ['supportedTopics', 'verifySignature', 'describeDelivery', 'readDelivery'];
 const CAPABILITY_KEYS = ['webhooks', 'lineItems', 'pdfLinks', 'updatedSinceFilter', 'documentUpdateEvents'];
 

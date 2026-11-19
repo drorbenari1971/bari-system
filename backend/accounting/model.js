@@ -50,3 +50,35 @@ export function contentHash(value) {
  * @property {string|null} updatedAt  ISO
  * @property {object} raw             the provider's record, without bank details
  */
+
+/**
+ * @typedef {Object} CanonicalDocument
+ * @property {string} externalId
+ * @property {'invoice'|'invoice_receipt'|'receipt'|'credit_note'|'quote'|'other'} kind
+ * @property {number} typeCode          the provider's own type code
+ * @property {'open'|'closed'|'cancelling'|'cancelled'} status
+ * @property {string} number
+ * @property {string} date              YYYY-MM-DD
+ * @property {string|null} createdAt    ISO
+ * @property {string} currency
+ * @property {{ gross: number, vat: number, net: number }} totals  agorot, local currency
+ * @property {string} description
+ * @property {{ externalId: string|null, name: string, phone: string, email: string }} customer
+ * @property {{ sku: string, externalItemId: string, description: string, quantity: number, unitPrice: number, total: number }[]} lines
+ * @property {{ method: string, label: string, app: string, amount: number }[]} payments
+ * @property {string} pdfUrl
+ * @property {string[]} linkedExternalIds
+ * @property {object} raw               without payment descriptions that could hold bank details
+ */
+
+/** Names compared as written, ignoring case and extra spaces. */
+export const normalizeName = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Emails compared case-insensitively. */
+export const normalizeEmail = (value) => {
+  const v = String(value ?? '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : '';
+};
+
+/** A stable key for product analysis: catalog number, item id, or the cleaned description. */
+export const productKey = (line) => (line.sku ? `sku:${line.sku}` : line.externalItemId ? `item:${line.externalItemId}` : `text:${normalizeName(line.description)}`);

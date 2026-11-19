@@ -111,10 +111,20 @@ router.post('/connections/:id/sync', wrap(async (req, res) => {
   res.status(created ? 202 : 200).json({ jobId: job.id, alreadyQueued: !created });
 }));
 
+const RUN_TYPES = ['customers', 'documents'];
 router.get('/sync-runs', (req, res) => {
-  const { connectionId, page, pageSize } = req.query;
-  const result = sync.listRuns({ connectionId, page, pageSize });
-  res.json(connectionId ? { ...result, knownCustomers: sync.knownCustomers(Number(connectionId)) } : result);
+  const { connectionId, type, page, pageSize } = req.query;
+  if (type && !RUN_TYPES.includes(type)) return res.status(400).json({ error: 'סוג סנכרון לא מוכר' });
+  const result = sync.listRuns({ connectionId, type, page, pageSize });
+  if (!connectionId) return res.json(result);
+  const id = Number(connectionId);
+  res.json({
+    ...result,
+    knownCustomers: sync.knownCustomers(id),
+    knownDocuments: sync.knownDocuments(id),
+    totalCustomers: sync.totalCustomers(),
+    latest: Object.fromEntries(RUN_TYPES.map((t) => [t, sync.latestRun(id, t)])),
+  });
 });
 
 router.get('/flags', (req, res) => res.json(flags.listFlags()));

@@ -1,6 +1,6 @@
 // The Morning (Green Invoice) provider.
 import { MorningClient, ENVIRONMENTS } from './client.js';
-import { toCanonicalCustomer } from './mapper.js';
+import { toCanonicalCustomer, toCanonicalDocument } from './mapper.js';
 import * as webhooks from './webhooks.js';
 
 /** @param {import('../base.js').Connection} conn @param {object} [deps] */
@@ -45,6 +45,27 @@ const morning = {
     const items = (r?.items ?? []).map(toCanonicalCustomer);
     const pages = Number(r?.pages) || (items.length < pageSize ? page : page + 1);
     return { items, page, pageSize, total: Number(r?.total ?? items.length), pages };
+  },
+
+  /**
+   * One page of documents, sorted by document date so the order stays stable between pages.
+   * The search already includes item rows and payments, so no per-document request is needed.
+   */
+  async listDocuments(conn, { page = 1, pageSize = 100 } = {}, deps) {
+    const r = await clientFor(conn, deps).request('POST', '/documents/search', { page, pageSize, sort: 'documentDate' });
+    const items = (r?.items ?? []).map(toCanonicalDocument);
+    const pages = Number(r?.pages) || (items.length < pageSize ? page : page + 1);
+    return { items, page, pageSize, total: Number(r?.total ?? items.length), pages };
+  },
+
+  /** One document (includes linked documents), or null when Morning does not have it. */
+  async getDocument(conn, externalId, deps) {
+    try {
+      return toCanonicalDocument(await clientFor(conn, deps).request('GET', `/documents/${encodeURIComponent(externalId)}`));
+    } catch (err) {
+      if (err.code === 'not_found') return null;
+      throw err;
+    }
   },
 
   /** One client, or null when Morning no longer has it. */
