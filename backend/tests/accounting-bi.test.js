@@ -107,6 +107,23 @@ test('cache: same answer until the data changes; correct with the cache off too'
   flags.setFlag('biCache', true);
 });
 
+test('filters by product and payment method; first purchases stay first-ever; retention ignores filters', () => {
+  const all = bi.dashboard();
+  const ghee = bi.dashboard({ product: 'ghee' });
+  assert.equal(ghee.summary.purchases, 2, 'A on 5 Jul (ציר וגהי) and C on 2 Sep (גהי)');
+  assert.equal(ghee.summary.newCustomers, 2, 'both were those customers\' first purchases');
+  assert.deepEqual(ghee.dataRange, all.dataRange);
+  assert.deepEqual(ghee.retention, all.retention);
+  const transfer = bi.dashboard({ method: 'bank_transfer' });
+  assert.equal(transfer.summary.purchases, 1);
+  assert.equal(transfer.summary.revenue, 20000, 'the credit note has no payment, so a method filter leaves it out');
+  const paybox = bi.dashboard({ method: 'PayBox', product: 'broth' });
+  assert.equal(paybox.summary.purchases, 0);
+  assert.deepEqual(all.filterOptions.products.map((p) => p.id), ['broth', 'ghee', 'kit', 'unspecified', 'none']);
+  assert.deepEqual(all.filterOptions.methods.map((m) => m.key).sort(), ['Bit', 'PayBox', 'bank_transfer'].sort());
+  assert.throws(() => bi.dashboard({ product: 'pizza' }), /מוצר/);
+});
+
 test('validation and the route', async () => {
   assert.throws(() => bi.dashboard({ from: '2026/01/01' }), /תאריך/);
   assert.throws(() => bi.dashboard({ from: '2026-09-01', to: '2026-08-01' }), /אחרי/);

@@ -189,9 +189,30 @@ function retention(allFacts, asOf) {
 
 const inRange = (from, to) => (f) => (!from || f.date >= from) && (!to || f.date <= to);
 
-function compute({ from, to, granularity }) {
-  const all = loadFacts();
-  const purchasesAll = all.filter((f) => f.purchase);
+/**
+ * Product and payment-method filters. Whether a purchase is a customer's first is decided on the
+ * full history before filtering, so "new customers" stays true to its meaning. Credit notes carry
+ * no product or payment, so a filter leaves them out.
+ */
+const matches = (product, method) => (f) => (!product || f.products.includes(product))
+  && (!method || f.payments.some((p) => (p.app || p.method) === method));
+
+function filterOptions(all) {
+  const labels = Object.fromEntries([...PRODUCT_RULES, UNSPECIFIED, NO_DESCRIPTION].map((p) => [p.id, p.label]));
+  const products = [...new Set(all.flatMap((f) => f.products))];
+  const methods = new Map();
+  for (const p of all.flatMap((f) => f.payments)) methods.set(p.app || p.method, { key: p.app || p.method, method: p.method, app: p.app });
+  return {
+    products: [...PRODUCT_RULES, UNSPECIFIED, NO_DESCRIPTION].filter((p) => products.includes(p.id)).map((p) => ({ id: p.id, label: labels[p.id] })),
+    methods: [...methods.values()],
+  };
+}
+
+function compute({ from, to, granularity, product, method }) {
+  const everything = loadFacts();
+  const options = filterOptions(everything);
+  const all = product || method ? everything.filter(matches(product, method)) : everything;
+  const purchasesAll = everything.filter((f) => f.purchase);
   const dataRange = { first: purchasesAll[0]?.date ?? null, last: purchasesAll.at(-1)?.date ?? null };
   const facts = all.filter(inRange(from, to));
   const current = totals(facts);
@@ -206,7 +227,8 @@ function compute({ from, to, granularity }) {
   const span = { from: from ?? dataRange.first, to: to ?? dataRange.last };
 
   return {
-    period: { from, to, granularity },
+    period: { from, to, granularity, product, method },
+    filterOptions: options,
     dataRange,
     summary: current,
     previous,
@@ -222,7 +244,7 @@ function compute({ from, to, granularity }) {
     productRules: PRODUCT_RULES.map(({ label, words }) => ({ label, words })),
     weekdays: byWeekday(facts),
     topCustomers: topCustomers(facts),
-    retention: retention(all, dataRange.last ?? iso(Date.now())),
+    retention: retention(everything, dataRange.last ?? iso(Date.now())),
   };
 }
 
@@ -236,14 +258,17 @@ const dataVersion = () => {
   return `${d.n}|${d.c}|${d.i}|${c.n}|${c.u}|${i.n}`;
 };
 
-/** @param {{ from?: string, to?: string, granularity?: 'month'|'week' }} opts */
-export function dashboard({ from = null, to = null, granularity = 'month' } = {}) {
+/** @param {{ from?: string, to?: string, granularity?: 'month'|'week', product?: string, method?: string }} opts */
+export function dashboard({ from = null, to = null, granularity = 'month', product = null, method = null } = {}) {
   if ((from && !DATE_RE.test(from)) || (to && !DATE_RE.test(to))) throw new AccountingError('תאריך לא תקין', { code: 'validation' });
   if (from && to && from > to) throw new AccountingError('תאריך ההתחלה אחרי תאריך הסיום', { code: 'validation' });
   if (!['month', 'week'].includes(granularity)) throw new AccountingError('חלוקה לא מוכרת', { code: 'validation' });
-  const opts = { from: from || null, to: to || null, granularity };
+  const productIds = [...PRODUCT_RULES, UNSPECIFIED, NO_DESCRIPTION].map((p) => p.id);
+  if (product && !productIds.includes(product)) throw new AccountingError('מוצר לא מוכר', { code: 'validation' });
+  if (method && (typeof method !== 'string' || method.length > 40)) throw new AccountingError('אמצעי תשלום לא תקין', { code: 'validation' });
+  const opts = { from: from || null, to: to || null, granularity, product: product || null, method: method || null };
   if (!isEnabled('biCache')) return compute(opts);
-  const key = `${opts.from}|${opts.to}|${granularity}|${dataVersion()}`;
+  const key = `${opts.from}|${opts.to}|${granularity}|${opts.product}|${opts.method}|${dataVersion()}`;
   if (!cache.has(key)) {
     if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value);
     cache.set(key, compute(opts));

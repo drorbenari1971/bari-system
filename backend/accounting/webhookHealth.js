@@ -20,8 +20,37 @@ const QUIET_DAYS = 7;
 
 const iso = (ms) => new Date(ms).toISOString();
 
-/** When the webhooks flag was last turned on (null if never stored). */
-const flagOnSince = () => db.prepare("SELECT updated_at FROM acc_feature_flags WHERE key = 'webhooks' AND enabled = 1").get()?.updated_at ?? null;
+/**
+ * The periods when webhooks were on, from the flag's change history, starting no earlier than the
+ * webhook setup: [[from, to | null]]. Turning the flag off and on again must not hide a customer
+ * that was missed while it was on, nor count one created while it was off.
+ */
+export function webhookOnPeriods(activatedAt) {
+  const changes = db.prepare(`
+    SELECT at, after FROM acc_audit_log WHERE action = 'flag.changed' AND entity_type = 'flag' AND entity_id = 'webhooks' ORDER BY id
+  `).all();
+  const periods = [];
+  let start = null;
+  for (const c of changes) {
+    const on = JSON.parse(c.after).enabled;
+    if (on && !start) start = c.at;
+    if (!on && start) { periods.push([start, c.at]); start = null; }
+  }
+  if (start) periods.push([start, null]);
+  return periods
+    .map(([from, to]) => [activatedAt && from < activatedAt ? activatedAt : from, to])
+    .filter(([from, to]) => !to || to > from);
+}
+
+const inPeriods = (periods, at) => periods.some(([from, to]) => at >= from && (!to || at < to));
+
+// What to do about the reason Morning's deliveries are being refused.
+const REJECTION_HELP = {
+  bad_signature: 'הסוד שמוגדר ב-Morning לא תואם לסוד במערכת. לחצו כאן "החלף סוד", העתיקו אותו בכפתור ההעתקה, והדביקו ב-Morning: כלי מפתחים ← Webhooks ← עריכה ← סוד (Secret).',
+  no_secret: 'לא נוצר סוד במערכת. לחצו "צור כתובת וסוד" והדביקו את הסוד ב-Morning.',
+  content_type: 'הבקשות לא נשלחות כ-JSON, ולכן הן כנראה לא מ-Morning. בדקו את הכתובת שהוגדרה ב-Morning.',
+  too_large: 'הבקשות גדולות מהמותר, ולכן הן כנראה לא מ-Morning. בדקו את הכתובת שהוגדרה ב-Morning.',
+};
 
 export function webhookHealth(connectionId, now = Date.now()) {
   const view = webhookView(connectionId);
@@ -40,27 +69,38 @@ export function webhookHealth(connectionId, now = Date.now()) {
     + (unarchivedFailures.get(connectionId) ?? 0);
 
   let missed = 0;
-  const since = [view.activatedAt, flagOnSince()].filter(Boolean).sort().at(-1);
-  if (enabled && configured && since) {
+  const periods = configured ? webhookOnPeriods(view.activatedAt) : [];
+  const since = periods.at(-1)?.[1] === null ? periods.at(-1)[0] : null; // start of the current on-period
+  if (enabled && configured && periods.length) {
     missed = db.prepare(`
-      SELECT COUNT(*) AS n FROM acc_customer_records r
+      SELECT r.source_created_at AS created FROM acc_customer_records r
       WHERE r.connection_id = ? AND r.source_created_at > ? AND r.first_seen_at >= ?
         AND (julianday(r.first_seen_at) - julianday(r.source_created_at)) * 1440 > ?
         AND NOT EXISTS (
           SELECT 1 FROM acc_jobs j WHERE j.connection_id = r.connection_id AND j.type = 'fetch_customer'
             AND j.source = 'webhook' AND json_extract(j.payload, '$.externalId') = r.external_id
         )
-    `).get(connectionId, since, iso(now - MISSED_LOOKBACK_HOURS * 3_600_000), MISSED_AFTER_MINUTES).n;
+    `).all(connectionId, periods[0][0], iso(now - MISSED_LOOKBACK_HOURS * 3_600_000), MISSED_AFTER_MINUTES)
+      .filter((r) => inPeriods(periods, r.created)).length;
   }
+
+  // A delivery Morning signed (its user agent) that failed the signature check: the secret differs.
+  const mismatch = db.prepare(`
+    SELECT COUNT(*) AS n FROM acc_webhook_archive
+    WHERE connection_id = ? AND id > ? AND outcome = 'rejected' AND rejection_reason = 'bad_signature' AND user_agent LIKE 'morning webhooks%'
+  `).get(connectionId, lastOkId).n;
 
   const warnings = [];
   if (!configured) warnings.push({ level: 'info', code: 'not_configured', text: 'עדיין לא נוצרו כתובת וסוד ל-Webhook.' });
   else if (!view.publicUrlSet) warnings.push({ level: 'info', code: 'no_public_url', text: 'לא הוגדרה הכתובת הציבורית של המנהרה (WEBHOOK_PUBLIC_URL בקובץ backend\\.env).' });
   if (configured && !enabled) warnings.push({ level: 'info', code: 'flag_off', text: 'ה-Webhooks כבויים במתגים. אירועים מאומתים נרשמים ולא מעובדים, והסנכרון התקופתי ממשיך כרגיל.' });
+  if (mismatch > 0) {
+    warnings.push({ level: 'error', code: 'secret_mismatch', text: `Morning שלחה ${mismatch} אירועים שהחתימה שלהם לא תואמת. ${REJECTION_HELP.bad_signature}` });
+  }
   if (failureStreak >= FAILURE_STREAK_WARNING) {
     warnings.push({
       level: 'error', code: 'failing',
-      text: `${failureStreak} שליחות ברצף נדחו${lastRejection?.rejection_reason ? ` (סיבה אחרונה: ${lastRejection.rejection_reason})` : ''}. Morning משביתה Webhook אחרי ${MORNING_DISABLES_AFTER} כישלונות.`,
+      text: `${failureStreak} שליחות ברצף נדחו. Morning משביתה Webhook אחרי ${MORNING_DISABLES_AFTER} כישלונות.${REJECTION_HELP[lastRejection?.rejection_reason] && !mismatch ? ` ${REJECTION_HELP[lastRejection.rejection_reason]}` : ''}`,
     });
   }
   if (missed > 0) {
@@ -76,7 +116,7 @@ export function webhookHealth(connectionId, now = Date.now()) {
 
   const status = !configured ? 'not_configured' : !enabled ? 'off'
     : warnings.some((w) => w.level === 'error') ? 'error' : warnings.some((w) => w.level === 'warning') ? 'warning' : 'ok';
-  return { status, enabled, configured, lastAcceptedAt: lastAccepted, lastDeliveryAt: lastAny, last24h: counts, failureStreak, missed, warnings };
+  return { status, enabled, configured, lastAcceptedAt: lastAccepted, lastDeliveryAt: lastAny, last24h: counts, failureStreak, missed, secretMismatch: mismatch, warnings };
 }
 
 // Console alert when a connection's webhook health turns to error (checked every minute).

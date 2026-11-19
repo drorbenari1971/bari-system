@@ -66,6 +66,9 @@ function BarList({ rows, color, valueText, emptyText }) {
 export default function BIDashboard({ onOpenCustomer }) {
   const [period, setPeriod] = useState('all');
   const [granularity, setGranularity] = useState('month');
+  const [product, setProduct] = useState('');
+  const [method, setMethod] = useState('');
+  const [options, setOptions] = useState({ products: [], methods: [] });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -77,12 +80,14 @@ export default function BIDashboard({ onOpenCustomer }) {
     const params = new URLSearchParams({ granularity });
     if (from) params.set('from', from);
     if (to) params.set('to', to);
+    if (product) params.set('product', product);
+    if (method) params.set('method', method);
     api.get(`/accounting/bi/dashboard?${params}`)
-      .then((r) => { if (alive) { setData(r); setError(null); } })
+      .then((r) => { if (alive) { setData(r); setOptions(r.filterOptions ?? { products: [], methods: [] }); setError(null); } })
       .catch((e) => alive && setError(e.message))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [from, to, granularity]);
+  }, [from, to, granularity, product, method]);
 
   useTheme(); // re-render on theme change, so the chart colors below are re-read
   const palette = document.documentElement.classList.contains('dark') ? COLORS.dark : COLORS.light;
@@ -108,6 +113,14 @@ export default function BIDashboard({ onOpenCustomer }) {
           <button key={id} onClick={() => setGranularity(id)} className={`rounded-lg px-3 py-1.5 ${granularity === id ? 'bg-sage-600 text-white' : 'text-charcoal-600'}`}>{label}</button>
         ))}
       </div>
+      <select className="input w-auto py-1.5 text-sm" value={product} onChange={(e) => setProduct(e.target.value)} aria-label="סינון לפי מוצר">
+        <option value="">כל המוצרים</option>
+        {options.products.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+      </select>
+      <select className="input w-auto py-1.5 text-sm" value={method} onChange={(e) => setMethod(e.target.value)} aria-label="סינון לפי אמצעי תשלום">
+        <option value="">כל אמצעי התשלום</option>
+        {options.methods.map((m) => <option key={m.key} value={m.key}>{methodLabel(m.method, m.app)}</option>)}
+      </select>
       {loading && data && <Spinner className="h-4 w-4 text-sage-500" />}
     </div>
   );
@@ -126,6 +139,7 @@ export default function BIDashboard({ onOpenCustomer }) {
       <p className="text-xs text-charcoal-500">
         {data.period.from ? `${fmtDay(data.period.from)} – ${fmtDay(data.period.to)}` : `כל הנתונים: ${fmtDay(data.dataRange.first)} – ${fmtDay(data.dataRange.last)}`}
         {data.previous && ` · השוואה ל-${fmtDay(data.previous.from)} – ${fmtDay(data.previous.to)}`}
+        {(product || method) && ' · מסונן לפי מוצר או אמצעי תשלום (השימור מחושב על כל הלקוחות)'}
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

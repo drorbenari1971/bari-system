@@ -149,8 +149,8 @@ router.get('/customers/:id', wrap(async (req, res) => res.json(customers.getCust
 
 // Business dashboard (stage 5).
 router.get('/bi/dashboard', wrap(async (req, res) => {
-  const { from, to, granularity } = req.query;
-  res.json(dashboard({ from, to, granularity }));
+  const { from, to, granularity, product, method } = req.query;
+  res.json(dashboard({ from, to, granularity, product, method }));
 }));
 
 router.get('/flags', (req, res) => res.json(flags.listFlags()));

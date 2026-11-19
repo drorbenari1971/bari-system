@@ -273,6 +273,8 @@ test('monitoring: failures in a row raise an error before Morning would disable 
   assert.equal(h.status, 'error');
   assert.equal(h.failureStreak, 3);
   assert.match(h.warnings.find((w) => w.code === 'failing').text, /15/);
+  assert.equal(h.secretMismatch, 3, 'signed by Morning (its user agent) but with another secret');
+  assert.match(h.warnings.find((w) => w.code === 'secret_mismatch').text, /החלף סוד/);
   assert.equal(await deliver({ ip: '192.0.2.60' }), 200);
   h = health.webhookHealth(conn.id);
   assert.equal(h.failureStreak, 0);
@@ -285,7 +287,7 @@ test('monitoring: Morning stopped sending - a customer that only the periodic sy
   const settings = JSON.parse(db.prepare('SELECT settings FROM acc_connections WHERE id = ?').get(conn.id).settings);
   settings.webhook.activatedAt = ago(2 * 3_600_000);
   db.prepare('UPDATE acc_connections SET settings = ? WHERE id = ?').run(JSON.stringify(settings), conn.id);
-  db.prepare("UPDATE acc_feature_flags SET updated_at = ? WHERE key = 'webhooks'").run(ago(2 * 3_600_000));
+  db.prepare("UPDATE acc_audit_log SET at = ? WHERE action = 'flag.changed' AND entity_id = 'webhooks'").run(ago(2 * 3_600_000));
 
   // Created in Morning 30 minutes ago, saved now by the periodic sync, no webhook ever came.
   const missedClient = toCanonicalCustomer({ id: 'c-missed', name: 'הגיע רק בסנכרון', phone: '050-4444444', creationDate: Math.floor(Date.now() / 1000) - 1800 });
@@ -307,6 +309,20 @@ test('monitoring: Morning stopped sending - a customer that only the periodic sy
   } finally { console.warn = warn; }
   assert.equal(logged.length, 1);
   assert.match(logged[0], /missed/);
+});
+
+test('monitoring: turning webhooks off and on keeps an earlier miss; a customer created while off is not counted', () => {
+  // Off 20 minutes ago, on again 5 minutes ago (c-missed was created 30 minutes ago, while on).
+  flags.setFlag('webhooks', false);
+  flags.setFlag('webhooks', true);
+  const [on, off] = db.prepare("SELECT id FROM acc_audit_log WHERE action = 'flag.changed' AND entity_id = 'webhooks' ORDER BY id DESC LIMIT 2").all();
+  db.prepare('UPDATE acc_audit_log SET at = ? WHERE id = ?').run(ago(20 * 60_000), off.id);
+  db.prepare('UPDATE acc_audit_log SET at = ? WHERE id = ?').run(ago(5 * 60_000), on.id);
+  assert.equal(health.webhookOnPeriods(null).length, 2);
+  // Created 15 minutes ago, while webhooks were off; saved now by the periodic sync.
+  upsertCustomerRecord(conn.id, toCanonicalCustomer({ id: 'c-off', name: 'נוצר כשהמתג כבוי', phone: '050-6666666', creationDate: Math.floor(Date.now() / 1000) - 900 }), { source: 'polling' });
+  assert.equal(health.webhookHealth(conn.id).missed, 1, 'still the one missed while on; not the one created while off');
+  db.prepare("DELETE FROM acc_customer_records WHERE external_id = 'c-off'").run();
 });
 
 test('monitoring: no delivery for 7 days is a warning', () => {

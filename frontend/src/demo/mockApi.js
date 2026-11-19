@@ -317,6 +317,8 @@ const routes = [
   ['GET', /^\/accounting\/customers$/, (db, m, body, params) => demoCustomers(params)],
   ['GET', /^\/accounting\/customers\/(\d+)$/, (db, m) => demoCustomerCard(m[1]) ?? fail('הלקוח לא נמצא')],
   ['GET', /^\/accounting\/bi\/dashboard$/, (db, m, body, params) => demoDashboard(params)],
+  ['GET', /^\/accounting\/jobs$/, () => ({ items: [], total: 0, page: 1, pageSize: 20, counts: { pending: 0, processing: 0, completed: 0, failed: 0, retry: 0 } })],
+  ['GET', /^\/accounting\/sync-runs$/, () => ({ items: [], total: 0, page: 1, pageSize: 10 })],
 
   // leads (backend/routes/leads.js syncs these from Airtable; the demo has fictional ones and no sync)
   ['GET', /^\/leads$/, (db) => ({

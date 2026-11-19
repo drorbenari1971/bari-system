@@ -5,6 +5,7 @@ import { api } from '../../api.js';
 import { fmtDateTime } from '../../constants.js';
 import { Card, Empty, ErrorNote, Notice, Spinner } from '../../components/ui.jsx';
 import WebhookPanel from './WebhookPanel.jsx';
+import MonitorCard from './MonitorCard.jsx';
 
 const STATUS = {
   ok: { label: 'מחובר', icon: CheckCircle2, cls: 'text-sage-700' },
@@ -89,6 +90,7 @@ export default function SyncSettings() {
           <Empty icon={PlugZap} title="אין עדיין חיבור">לחצו "חיבור חדש" והזינו את פרטי ה-API מ-Morning</Empty>
         )}
       </Card>
+      <MonitorCard onChanged={refreshAudit} />
       <FlagsCard onChanged={refreshAudit} />
       <ChangeHistory refreshKey={auditKey} />
     </div>
