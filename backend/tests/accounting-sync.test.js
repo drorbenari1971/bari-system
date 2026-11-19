@@ -235,12 +235,26 @@ test('schedule: first sync at once, then by the chosen interval, and only when t
 test('flags: changes are audited; a value in .env locks the flag', () => {
   const [entry] = audit.list({ action: 'flag.changed' }).items;
   assert.deepEqual(entry.changes, [{ field: 'enabled', from: false, to: true }]);
-  process.env.FEATURE_WEBHOOKS = 'false';
+  process.env.FEATURE_POLLING = 'false';
+  assert.equal(flags.isEnabled('polling'), false);
+  assert.equal(flags.listFlags().find((f) => f.key === 'polling').lockedByEnv, true);
+  assert.throws(() => flags.setFlag('polling', true), /נעול/);
+  delete process.env.FEATURE_POLLING;
+  assert.equal(flags.isEnabled('polling'), true);
+});
+
+test('WEBHOOKS_ENABLED: off by default, .env can only lock it off, the screen turns it on', () => {
   assert.equal(flags.isEnabled('webhooks'), false);
-  assert.equal(flags.listFlags().find((f) => f.key === 'webhooks').lockedByEnv, true);
-  assert.throws(() => flags.setFlag('webhooks', true), /נעול/);
-  delete process.env.FEATURE_WEBHOOKS;
+  process.env.WEBHOOKS_ENABLED = 'true';
+  assert.equal(flags.isEnabled('webhooks'), false, '.env cannot turn webhooks on');
+  assert.equal(flags.listFlags().find((f) => f.key === 'webhooks').lockedByEnv, false);
+  flags.setFlag('webhooks', true);
   assert.equal(flags.isEnabled('webhooks'), true);
+  process.env.WEBHOOKS_ENABLED = 'false';
+  assert.equal(flags.isEnabled('webhooks'), false, '.env can force it off');
+  assert.throws(() => flags.setFlag('webhooks', true), /WEBHOOKS_ENABLED/);
+  delete process.env.WEBHOOKS_ENABLED;
+  flags.setFlag('webhooks', false);
 });
 
 test('runs are listed newest first', () => {

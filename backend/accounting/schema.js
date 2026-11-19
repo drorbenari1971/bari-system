@@ -326,3 +326,14 @@ addColumns('acc_sync_runs', {
   item_errors: "TEXT NOT NULL DEFAULT '[]'", // first few per-record errors: [{ externalId, error }]
 });
 db.exec('CREATE INDEX IF NOT EXISTS idx_acc_sync_runs_conn ON acc_sync_runs(connection_id, type, id)');
+
+// Stage 3 (webhooks): a delivery is only a trigger, so the archive keeps metadata, never the body.
+addColumns('acc_webhook_archive', {
+  outcome: "TEXT NOT NULL DEFAULT 'rejected'", // accepted | duplicate | ignored | unreadable | disabled | rejected
+  body_size: 'INTEGER NOT NULL DEFAULT 0',
+});
+db.exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_acc_archive_accepted_delivery
+  ON acc_webhook_archive(connection_id, delivery_id) WHERE outcome = 'accepted' AND delivery_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_acc_archive_conn ON acc_webhook_archive(connection_id, id);
+`);

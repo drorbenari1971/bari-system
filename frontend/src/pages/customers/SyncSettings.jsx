@@ -4,6 +4,7 @@ import { PlugZap, Pencil, Trash2, CheckCircle2, XCircle, CircleDashed, History, 
 import { api } from '../../api.js';
 import { fmtDateTime } from '../../constants.js';
 import { Card, Empty, ErrorNote, Notice, Spinner } from '../../components/ui.jsx';
+import WebhookPanel from './WebhookPanel.jsx';
 
 const STATUS = {
   ok: { label: 'מחובר', icon: CheckCircle2, cls: 'text-sage-700' },
@@ -23,6 +24,9 @@ const ACTION_LABEL = {
   'customer.removed_in_source': 'לקוח הוסר ב-Morning',
   'customer.restored_in_source': 'לקוח חזר ב-Morning',
   'flag.changed': 'מתג שונה',
+  'connection.webhook_secret_created': 'נוצר סוד ל-Webhook',
+  'connection.webhook_secret_rotated': 'סוד ה-Webhook הוחלף',
+  'connection.webhook_token_rotated': 'כתובת ה-Webhook הוחלפה',
 };
 
 const SOURCE_LABEL = { manual: 'ידני', polling: 'סנכרון תקופתי', system: 'מערכת', webhook: 'Webhook', replay: 'הרצה חוזרת' };
@@ -74,7 +78,7 @@ export default function SyncSettings() {
           />
         ) : connections.length ? (
           <ul className="space-y-4">
-            {connections.map((c) => <ConnectionRow key={c.id} connection={c} onEdit={() => setEditing(c)} onChanged={load} onSynced={refreshAudit} />)}
+            {connections.map((c) => <ConnectionRow key={c.id} connection={c} onEdit={() => setEditing(c)} onChanged={load} onSynced={refreshAudit} refreshKey={auditKey} />)}
           </ul>
         ) : (
           <Empty icon={PlugZap} title="אין עדיין חיבור">לחצו "חיבור חדש" והזינו את פרטי ה-API מ-Morning</Empty>
@@ -86,7 +90,7 @@ export default function SyncSettings() {
   );
 }
 
-function ConnectionRow({ connection: c, onEdit, onChanged, onSynced }) {
+function ConnectionRow({ connection: c, onEdit, onChanged, onSynced, refreshKey }) {
   const [busy, setBusy] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -139,6 +143,7 @@ function ConnectionRow({ connection: c, onEdit, onChanged, onSynced }) {
         : <div className="mt-3"><ErrorNote error={result.text} /></div>)}
       {error && <div className="mt-3"><ErrorNote error={error} /></div>}
       <CustomerSync connection={c} onChanged={onChanged} onSynced={onSynced} />
+      <WebhookPanel connection={c} refreshKey={refreshKey} onChanged={onSynced} />
     </li>
   );
 }

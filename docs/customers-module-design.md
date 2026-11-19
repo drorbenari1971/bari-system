@@ -159,71 +159,125 @@ frontend/src/customers/
 
 **הוספת ספק בעתיד** (iCount, ריווחית, Priority, חשבשבת): תיקייה חדשה תחת `providers/`, ורישום שלה ב-`index.js`. שום שינוי בליבה, ב-BI או במסכים.
 
-## 6. Webhooks
+## 6. Webhooks (שלב 3, כפי שאושר ומומש)
 
-### נקודת הקצה
-`POST /api/webhooks/morning`, בשרת הקיים.
+**עיקרון:** Webhook הוא **טריגר בלבד**. ה-API Pull (שלב 2) נשאר מקור האמת: אירוע רק מכניס ל-Queue משימה שמושכת את הרשומה מה-API. תוכן האירוע לא נשמר ולא משמש כנתון.
 
-**שינוי בשרת הקיים:** ה-middleware שחוסם כל בקשה שלא מהמחשב הזה יקבל **חריגה אחת בלבד**: `POST` לנתיב הזה. כל נתיב אחר, כולל אותו נתיב ב-GET, נשאר חסום מבחוץ. לכן גם אם המנהרה תחשוף בטעות את כל הפורט, רק הנתיב הזה יענה.
+### מה Morning מספקת (OpenAPI 2.0.0, חלק Webhooks)
+- **הגדרה:** בממשק של Morning בלבד (כלי מפתחים ← Webhooks): כתובת, אירועים, וסוד אופציונלי של עד 32 תווים.
+- **חתימה:** `x-webhook-signature` = HMAC-SHA256 בפורמט hex של **הגוף הגולמי**. הכותרות, כולל `x-webhook-timestamp` ו-`x-webhook-delivery-id`, **לא חתומות**.
+- **כותרות:** `x-webhook-topic`, `x-webhook-id`, `x-webhook-delivery-id`, `x-webhook-timestamp`, `x-correlation-id`, `user-agent: morning webhooks x.y`.
+- **אישור קבלה:** 200, 201, 202 או 204. כל השאר נחשב כישלון, ו**אחרי 15 כישלונות ה-Webhook מושבת** ומופעל מחדש ידנית.
+- **מה לא מתועד:** שליחה חוזרת, timeout, סדר אירועים, כתובות IP ומגבלת קצב.
+- **אירועים:** רק יצירה (`client/created`, `document/created`, `payment/received` ועוד). אין אירוע עדכון או מחיקה.
 
-### תהליך הקבלה (מהיר, עד מאות מילישניות)
+### נקודת הקצה: מאזין נפרד
+השרת הראשי חוסם כל בקשה שלא מגיעה בשם `localhost`, ובקשה דרך מנהרה נושאת שם חיצוני. כדי לא לשנות את `server.js` ולא להחליש את ההגנה, ה-Webhook מתקבל ב**מאזין נפרד**, `backend/accounting/webhookReceiver.js`:
+- **כתובת:** `127.0.0.1:WEBHOOK_PORT`, ברירת מחדל 4100. הוא עולה מתוך `startAccounting()`.
+- **נתיב:** אחד בלבד, `POST /<provider>/<url-token>`. כל השאר מחזיר 404, וכתובת לא מוכרת אפילו לא נרשמת.
+- **מנהרה:** ngrok או Cloudflare Tunnel מפנה **רק לפורט הזה**. הכתובת הציבורית נשמרת ב-`WEBHOOK_PUBLIC_URL` בקובץ `backend\.env`. המערכת עצמה (פורט 4000) נשארת מקומית בלבד.
 
 ```mermaid
 sequenceDiagram
   participant M as Morning
-  participant R as Webhook Receiver
-  participant Q as Queue (acc_jobs)
+  participant T as מנהרה
+  participant R as Receiver (127.0.0.1:4100)
+  participant Q as Queue
   participant W as Worker
-  M->>R: POST /api/webhooks/morning (raw body + headers)
-  R->>R: יש חיבור Morning פעיל עם סוד? אחרת 401
-  R->>R: HMAC-SHA256(raw body, secret) מול x-webhook-signature (השוואה בזמן קבוע)
-  R->>R: שמירה בארכיון הגולמי (acc_webhook_archive): headers, body, delivery-id, זמנים, תוצאת האימות
-  alt חתימה שגויה/חסרה
-    R-->>M: 401
-  else תקין, flag "webhooks" כבוי
-    R-->>M: 200 (נשמר בארכיון בלבד, ה-Polling ישלים)
-  else תקין
-    R->>Q: INSERT job (dedupe_key = delivery-id) — כפילות → מתעלמים
-    R-->>M: 200
-    R->>W: kick (התחלת עיבוד מיד)
-  end
+  participant A as Morning API
+  M->>T: POST /morning/<url-token>
+  T->>R: (רק הפורט הזה)
+  R->>R: נתיב → חיבור; קצב; חסימה; content-type; גודל
+  R->>R: HMAC על הבתים הגולמיים (השוואה בזמן קבוע)
+  R->>R: ארכיון: מטא-דאטה בלבד
+  R->>Q: fetch_customer {externalId} (dedupe)
+  R-->>M: 200 מיד (בלי קריאה ל-API, בלי retry בתוך הבקשה)
+  Q->>W: עיבוד
+  W->>A: GET /clients/{id}
+  W->>W: upsert + Audit (source = webhook); retry של ה-Queue בכישלון
 ```
 
-**הגנות נוספות בנקודת הקצה:**
-- **גודל:** עד 1MB לבקשה.
-- **הגבלת קצב:** עד 50 בקשות בדקה מכל כתובת, כדי לבלום ניסיונות הצפה. Morning שולחת הרבה פחות.
-- **שליחה חוזרת:** הסוד חובה, ומזהה משלוח שכבר התקבל לא נכנס שוב ל-Queue.
-- **חותמת זמן:** ‏`x-webhook-timestamp` לא נכלל בחתימה של Morning, ולכן הוא נשמר רק לניטור ולא משמש לאימות.
+### URL token מול HMAC secret (`webhookConfig.js`)
+| | URL token | HMAC secret |
+|---|---|---|
+| **תפקיד** | זיהוי נקודת הקצה והחיבור | אימות קריפטוגרפי שהשליחה מ-Morning |
+| **יצירה** | 32 תווי base64url אקראיים (`crypto.randomBytes`) | 32 תווים אלפא-נומריים אקראיים, בלי הטיה, באורך המקסימלי של Morning |
+| **שמירה** | `acc_connections.settings.webhook.pathToken` | `acc_connections.webhook_secret_enc`, מוצפן ב-AES-256-GCM |
+| **תצוגה** | חלק מהכתובת במסך | **פעם אחת**, מיד אחרי היצירה. לא מוחזר שוב מה-API, לא נרשם ב-Audit ולא בלוג |
+| **השוואה** | hash של שני הצדדים, ואחר כך `timingSafeEqual` | `timingSafeEqual` על ה-HMAC |
+| **החלפה** | "החלף כתובת": הסוד לא משתנה, והכתובת הישנה מחזירה 404 | "החלף סוד": הכתובת לא משתנה, והסוד הישן נדחה |
+| **מה מגן מה** | לא מגן לבד. הוא רק מונע מסריקה אקראית להגיע לבדיקת החתימה | ההגנה עצמה. בלי סוד כל שליחה נדחית |
 
-### 6.1 ארכיון Webhooks גולמי (Raw Event Archive)
+- **מקור יחיד לסוד:** אי אפשר לקבוע סוד ידנית או לשנות את ההגדרות דרך `PUT /connections`. הנתיבים היחידים הם `POST /connections/:id/webhook/secret` ו-`.../token`.
+- **הסתרה מהרשימה ומהיומן:** ההגדרה לא מופיעה ברשימת החיבורים וביומן השינויים.
 
-כל בקשה שמגיעה לנקודת הקצה נשמרת **לפני** כל עיבוד, בטבלה `acc_webhook_archive`, גם אם החתימה שלה שגויה:
+### Feature Flag: `WEBHOOKS_ENABLED`
+- **ברירת מחדל:** כבוי.
+- **הדלקה:** **רק** במסך ההגדרות, בכרטיס "מתגים". השינוי נרשם ב-Audit.
+- **ב-`backend\.env`:** `WEBHOOKS_ENABLED=false` נועל את המתג כבוי. `true` שם לא מדליק.
+- **כשהמתג כבוי:** שליחה מאומתת נרשמת עם התוצאה `disabled` ומקבלת 200, בלי משימה. כך Morning לא סופרת כישלונות, וה-Pull ממשיך כרגיל.
 
-| עמודה | תיאור |
+### אירועים
+| נושא | טיפול |
 |---|---|
-| `id`, `received_at` | זמן הקבלה אצלנו |
-| `delivery_id`, `topic`, `webhook_id`, `event_timestamp`, `correlation_id` | מהכותרות של Morning |
-| `headers` | כל הכותרות כפי שהתקבלו, חוץ מ-`cookie` ו-`authorization` אם יופיעו |
-| `body` | הגוף **בדיוק** כפי שהתקבל (הבייטים הגולמיים), ו-`body_sha256` לזיהוי |
-| `remote_ip`, `user_agent` | |
-| `signature_valid` | `true` / `false`, ו-`rejection_reason` אם נדחה |
-| `job_id` | ה-Job שנוצר מהאירוע, אם נוצר |
+| `client/created` | **פעיל.** `fetch_customer(id)` |
+| `document/created` | **לא פעיל עדיין.** נרשם כ-`ignored` ומקבל 200. יתווסף בשורה אחת ב-`providers/morning/webhooks.js` (`TOPICS`), ו-`fetch_document` ב-`JOB_FOR_KIND`, אחרי בדיקה, יחד עם סנכרון המסמכים |
+| כל השאר | `ignored` ו-200 |
 
-**כללים:**
-- **לקריאה בלבד:** הלוגיקה העסקית לא קוראת מהארכיון. אין נתיב API שמשנה או מוחק רשומה.
-- **שחזור תקלות:** מהמסך אפשר לבחור אירוע **מאומת** ולהריץ אותו מחדש ("Replay"). זה יוצר Job חדש ב-Queue עם `source = replay`, ונרשם ב-Audit. הרשומה בארכיון לא משתנה.
-- **הגנה מניצול:** בקשה שהחתימה שלה שגויה נשמרת רק עם 10KB הראשונים של הגוף, ובכפוף להגבלת הקצב, כדי שאי אפשר יהיה למלא את הדיסק.
-- **שמירה לאורך זמן:** ברירת המחדל היא 365 יום, וניתן לשנות את זה בהגדרות (0 = לנצח). הערכת נפח: מסמך של Morning הוא כמה KB, כך ש-100 אלף אירועים תופסים כמה מאות MB.
-- הטבלה הזו מחליפה את `acc_webhook_deliveries` מגרסה 1.
+### תוצאות ותשובות
+| מצב | תשובה | תוצאה בארכיון |
+|---|---|---|
+| נתיב או token לא מוכרים | 404 | לא נרשם |
+| לא POST | 405 | לא נרשם |
+| כתובת חסומה (10 חתימות שגויות ב-10 דקות) | 403 | לא נרשם (נספר בזיכרון) |
+| מעל 60 בדקה לכתובת, או 300 בדקה בסך הכל | 429 | לא נרשם (נספר בזיכרון) |
+| content-type שאינו JSON | 415 | `rejected` / `content_type` |
+| מעל 1MB | 413 | `rejected` / `too_large` |
+| אין סוד, או חתימה שגויה | 401 | `rejected` / `no_secret`, `bad_signature` |
+| חתום, ומזהה שליחה שכבר התקבל | 200 | `duplicate` |
+| חתום, מתג כבוי או חיבור מושבת | 200 | `disabled` |
+| חתום, נושא לא פעיל | 200 | `ignored` |
+| חתום, גוף לא קריא או בלי מזהה | 200 | `unreadable` |
+| חתום ותקין | 200 | `accepted`, עם `job_id` |
 
-### אילו אירועים מטופלים
+### ארכיון: מטא-דאטה בלבד
+`acc_webhook_archive` **לא שומרת את גוף השליחה**, גם לא של שליחה תקינה. נשמרים:
+- `delivery_id`, `topic`, `webhook_id`, `event_timestamp`, `correlation_id`
+- כותרות נבחרות בלבד (`KEPT_HEADERS`): בלי חתימה ובלי cookie
+- `body_sha256`, `body_size`, `remote_ip`, `user_agent`, `signature_valid`, `outcome`, `rejection_reason`, `job_id`
 
-| נושא | הטיפול |
-|---|---|
-| `document/created` | Job מסוג `fetch_document` עבור ה-`id` |
-| `payment/received` | Job מסוג `check_new`, כי תשלום יוצר בדרך כלל קבלה |
-| `client/created` | Job מסוג `fetch_customer` |
-| כל נושא אחר | נרשם ומדולג, עם תשובת 200 כדי לא להיספר ככישלון |
+**שמירה:** 30 יום, עם ניקוי אוטומטי כל שעה.
+
+**"הרץ שוב":** יוצר מחדש את המשימה של שליחה מאומתת, מתוך ה-`payload` של המשימה המקורית, עם `source = replay`.
+
+**Debug של payload, אם יידרש בעתיד:** ייבנה כמנגנון ייעודי וזמני, לא כשמירה קבועה.
+
+### אמינות
+- **כפילויות:**
+  - אינדקס ייחודי על `(connection_id, delivery_id)` לשליחות `accepted`.
+  - מפתח dedupe `fetch_customer:<חיבור>:<לקוח>` מאחד אירועים לאותו לקוח.
+  - עיבוד חוזר לא כותב כלום, כי ה-hash זהה.
+- **סדר:** לא משנה. כל משימה מושכת את המצב הנוכחי מה-API.
+- **Retry:** רק ב-Queue. ה-Receiver לא קורא ל-Morning ולא מנסה שוב בתוך בקשת ה-HTTP. `ingest()` סינכרוני ועונה מיד.
+- **Fallback:** ה-Pull רץ בתדירות הרגילה בכל מקרה.
+
+### ניטור והתראה (`webhookHealth.js`)
+Morning לא מודיעה כשהיא משביתה Webhook, ולכן:
+- **כישלונות ברצף:** דחיות בארכיון, ו-403 או 429 שנספרו בזיכרון, מאז התשובה התקינה האחרונה. מ-3 ברצף מוצגת **תקלה**, עם הסבר שאחרי 15 Morning משביתה.
+- **"הגיע רק מה-Pull":** לקוח שנוצר ב-Morning אחרי הפעלת ה-Webhooks, נשמר יותר מ-10 דקות אחרי שנוצר, ואין עליו משימת webhook. זה סימן ש-Morning הפסיקה לשלוח, ומוצגת **תקלה** עם הנחיה להפעיל מחדש ב-Morning. הבדיקה מסתכלת על 48 השעות האחרונות.
+- **שקט:** אין אף אירוע 7 ימים, ומוצגת **אזהרה**.
+- **התראה:**
+  - בכרטיס ה-Webhook במסך.
+  - ב-`GET /api/accounting/health`.
+  - ובלוג השרת, פעם אחת בכל מעבר למצב תקלה. הבדיקה רצה כל דקה.
+
+### Database
+- **טבלאות חדשות:** אין.
+- **עמודות חדשות:** `acc_webhook_archive.outcome` ו-`body_size`, ושני אינדקסים: אחד ייחודי לשליחות שהתקבלו, ואחד לחיבור.
+- **הגדרות:** `settings.webhook` (`pathToken`, `secretSetAt`, `activatedAt`).
+
+### נקודות קצה
+`GET /connections/:id/webhook`, `POST /connections/:id/webhook/secret`, `POST /connections/:id/webhook/token`, `GET /webhook-deliveries`, `POST /webhook-deliveries/:id/replay`, `GET /health`.
 
 ## 7. ה-Queue
 
@@ -561,16 +615,16 @@ sequenceDiagram
 
 | Flag | כשהוא **כבוי** | מה ממשיך לעבוד |
 |---|---|---|
-| `webhooks` | נקודת הקצה ממשיכה לאמת ולשמור בארכיון, ועונה 200, אבל **לא יוצרת Jobs**. כך Morning לא סופרת כישלונות ולא משביתה את ה-Webhook | ה-Polling משלים את המסמכים, אם הוא דולק |
+| `webhooks` (`WEBHOOKS_ENABLED`, **ברירת מחדל: כבוי**, נדלק רק מהמסך) | נקודת הקצה ממשיכה לאמת ולשמור בארכיון, ועונה 200, אבל **לא יוצרת Jobs**. כך Morning לא סופרת כישלונות ולא משביתה את ה-Webhook | ה-Polling משלים את המסמכים, אם הוא דולק |
 | `polling` | אין `check_new`, `reconcile_recent` ו-`reconcile_full` אוטומטיים | Webhooks, וסנכרון ידני מהמסך |
 | `autoSync` | כל התזמונים מושבתים: Polling, התאמות ו-`bi_verify` | Webhooks וסנכרון ידני |
 | `biCache` | הדשבורד מחושב ישירות מה-facts (איטי יותר, אבל נכון), ועדכוני ה-delta לסיכומים נעצרים | כל השאר. בהדלקה מחדש רץ `bi_rebuild` ברקע, והדשבורד עובר לסיכומים רק כשהבנייה מסתיימת |
 | `liveDashboard` | אין SSE. המסכים מתרעננים כל 60 שניות ובכפתור "רענן" | כל השאר |
 
 **איך מגדירים:**
-- **ברירת מחדל:** כולם דולקים.
+- **ברירת מחדל:** כולם דולקים, חוץ מ-`webhooks`, שכבוי עד שמדליקים אותו במסך.
 - **מסך ההגדרות:** מתג לכל flag. השינוי נכנס לתוקף מיד, בלי הפעלה מחדש, ונרשם ב-Audit (`flag.changed`).
-- **קובץ התצורה** (`backend\.env`): למשל `FEATURE_WEBHOOKS=false`. ערך שמוגדר שם **גובר על המסך**, והמתג מוצג נעול עם הסבר. זה שימושי כשצריך לכבות משהו לפני שהשרת עולה.
+- **קובץ התצורה** (`backend\.env`): למשל `FEATURE_POLLING=false` או `WEBHOOKS_ENABLED=false` (את `webhooks` אפשר רק לנעול כבוי מהקובץ, לא להדליק). ערך שמוגדר שם **גובר על המסך**, והמתג מוצג נעול עם הסבר. זה שימושי כשצריך לכבות משהו לפני שהשרת עולה.
 - **ניטור:** כל flag כבוי מוצג כאזהרה, כדי שלא יישאר כבוי בטעות.
 
 **התאמה לשאר הארכיטקטורה:** ה-flags רק מחליטים אם מנגנון רץ. הם לא משנים את מבנה הנתונים ואת מסלול העיבוד. כל מה שנכנס, בכל מצב, עובר דרך אותו Queue, אותה שמירה ואותו Audit.

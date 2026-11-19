@@ -36,9 +36,13 @@
  *   One page of customers, in the provider's own order.
  * @property {(conn: Connection, externalId: string) => Promise<import('../model.js').CanonicalCustomer|null>} getCustomer
  *   null when the provider no longer has the customer.
+ * @property {object} [webhooks]  required when capabilities.webhooks is true:
+ *   { SECRET_LENGTH, KEPT_HEADERS, supportedTopics(), verifySignature(secret, rawBody, signature),
+ *     describeDelivery(headers), readDelivery(topic, rawBody) } (see providers/morning/webhooks.js)
  */
 
 const REQUIRED_FUNCTIONS = ['testConnection', 'listCustomers', 'getCustomer'];
+const WEBHOOK_FUNCTIONS = ['supportedTopics', 'verifySignature', 'describeDelivery', 'readDelivery'];
 const CAPABILITY_KEYS = ['webhooks', 'lineItems', 'pdfLinks', 'updatedSinceFilter', 'documentUpdateEvents'];
 
 /** Fails fast at startup if a provider does not implement the contract. */
@@ -49,6 +53,9 @@ export function assertProvider(p) {
   if (!Array.isArray(p?.credentialFields) || !p.credentialFields.length) problems.push('credentialFields');
   for (const key of CAPABILITY_KEYS) if (typeof p?.capabilities?.[key] !== 'boolean') problems.push(`capabilities.${key}`);
   for (const fn of REQUIRED_FUNCTIONS) if (typeof p?.[fn] !== 'function') problems.push(fn);
+  if (p?.capabilities?.webhooks) {
+    for (const fn of WEBHOOK_FUNCTIONS) if (typeof p.webhooks?.[fn] !== 'function') problems.push(`webhooks.${fn}`);
+  }
   if (problems.length) throw new Error(`Accounting provider "${p?.id ?? '?'}" is missing: ${problems.join(', ')}`);
   return p;
 }

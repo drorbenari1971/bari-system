@@ -20,7 +20,7 @@ function publicView(r) {
     label: r.label,
     environment: r.environment,
     enabled: !!r.enabled,
-    settings: JSON.parse(r.settings),
+    settings: (({ webhook, ...rest }) => rest)(JSON.parse(r.settings)), // webhook setup: /connections/:id/webhook
     credentials: Object.fromEntries(provider.credentialFields.map((f) => [f.key, {
       set: !!creds[f.key],
       hint: creds[f.key] && !f.secret ? mask(creds[f.key]) : null,
@@ -38,6 +38,7 @@ function publicView(r) {
 /** For audit: what changed, without any secret value. */
 const auditView = (r) => {
   const v = publicView(r);
+  // publicView leaves out the webhook setup (its address token is kept out of the log too).
   return { label: v.label, environment: v.environment, enabled: v.enabled, settings: v.settings, credentials: v.credentials, webhookSecretSet: v.webhookSecretSet };
 };
 
@@ -62,7 +63,8 @@ function validate(provider, { environment, credentials = {} }, { partial }) {
   }
 }
 
-export function createConnection({ provider: providerId, label = '', environment, credentials, webhookSecret }, source = 'manual') {
+// The webhook secret is only ever generated, in webhookConfig.js.
+export function createConnection({ provider: providerId, label = '', environment, credentials }, source = 'manual') {
   if (!hasProvider(providerId)) throw new AccountingError('ספק לא מוכר', { code: 'validation' });
   const provider = getProvider(providerId);
   const env = environment ?? Object.keys(provider.environments)[0];
@@ -72,9 +74,9 @@ export function createConnection({ provider: providerId, label = '', environment
   db.exec('BEGIN');
   try {
     const r = db.prepare(`
-      INSERT INTO acc_connections (provider, label, environment, credentials_enc, webhook_secret_enc)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(providerId, String(label).trim() || provider.label, env, encrypt(clean), webhookSecret ? encrypt(String(webhookSecret)) : null);
+      INSERT INTO acc_connections (provider, label, environment, credentials_enc)
+      VALUES (?, ?, ?, ?)
+    `).run(providerId, String(label).trim() || provider.label, env, encrypt(clean));
     const id = Number(r.lastInsertRowid);
     audit.record({ action: 'connection.created', source, entityType: 'connection', entityId: id, after: auditView(row(id)) });
     db.exec('COMMIT');
@@ -86,7 +88,7 @@ export function createConnection({ provider: providerId, label = '', environment
 }
 
 /** Empty or missing secret fields keep their current value. */
-export function updateConnection(id, { label, environment, credentials = {}, webhookSecret, enabled, settings }, source = 'manual') {
+export function updateConnection(id, { label, environment, credentials = {}, enabled, settings }, source = 'manual') {
   const current = row(id);
   if (!current) throw new AccountingError('החיבור לא נמצא', { code: 'not_found', status: 404 });
   const provider = getProvider(current.provider);
@@ -103,13 +105,12 @@ export function updateConnection(id, { label, environment, credentials = {}, web
   db.exec('BEGIN');
   try {
     db.prepare(`
-      UPDATE acc_connections SET label = ?, environment = ?, credentials_enc = ?, webhook_secret_enc = ?,
+      UPDATE acc_connections SET label = ?, environment = ?, credentials_enc = ?,
         enabled = ?, settings = ?, status = ?, updated_at = ? WHERE id = ?
     `).run(
       label !== undefined ? String(label).trim() || provider.label : current.label,
       environment ?? current.environment,
       credsChanged ? encrypt(creds) : current.credentials_enc,
-      typeof webhookSecret === 'string' && webhookSecret ? encrypt(webhookSecret) : current.webhook_secret_enc,
       enabled === undefined ? current.enabled : (enabled ? 1 : 0),
       settings === undefined ? current.settings : JSON.stringify({ ...JSON.parse(current.settings), ...settings }),
       // New credentials or environment: the last check no longer applies.

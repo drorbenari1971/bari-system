@@ -1,6 +1,7 @@
 // The Morning (Green Invoice) provider.
 import { MorningClient, ENVIRONMENTS } from './client.js';
 import { toCanonicalCustomer } from './mapper.js';
+import * as webhooks from './webhooks.js';
 
 /** @param {import('../base.js').Connection} conn @param {object} [deps] */
 export const clientFor = (conn, deps) => new MorningClient({
@@ -27,6 +28,8 @@ const morning = {
     updatedSinceFilter: false,
     documentUpdateEvents: false,
   },
+
+  webhooks,
 
   /** Gets a token, then reads one document page to prove data access. */
   async testConnection(conn, deps) {

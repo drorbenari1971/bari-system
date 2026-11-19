@@ -1,6 +1,8 @@
 // /api/accounting: provider connections, customer sync, queue, flags and audit log (local only).
 import { Router } from 'express';
-import { listProviders } from '../accounting/providers/index.js';
+import { listProviders, getProvider } from '../accounting/providers/index.js';
+import * as webhookConfig from '../accounting/webhookConfig.js';
+import * as webhookHealth from '../accounting/webhookHealth.js';
 import { describeProvider } from '../accounting/providers/base.js';
 import * as connections from '../accounting/connections.js';
 import * as queue from '../accounting/queue.js';
@@ -35,18 +37,60 @@ router.get('/providers', (req, res) => res.json(listProviders().map(describeProv
 
 router.get('/connections', (req, res) => res.json(connections.listConnections()));
 
+// The webhook secret and address are never set here: only generated, through /connections/:id/webhook/*.
 router.post('/connections', wrap(async (req, res) => {
-  const { provider, label, environment, credentials, webhookSecret } = req.body ?? {};
-  res.status(201).json(connections.createConnection({ provider, label, environment, credentials: credentials ?? {}, webhookSecret }));
+  const { provider, label, environment, credentials } = req.body ?? {};
+  res.status(201).json(connections.createConnection({ provider, label, environment, credentials: credentials ?? {} }));
 }));
 
+const EDITABLE_SETTINGS = ['customerSyncMinutes'];
 router.put('/connections/:id', wrap(async (req, res) => {
-  const { label, environment, credentials, webhookSecret, enabled, settings } = req.body ?? {};
+  const { label, environment, credentials, enabled, settings } = req.body ?? {};
+  if (settings !== undefined && (typeof settings !== 'object' || Object.keys(settings).some((k) => !EDITABLE_SETTINGS.includes(k)))) {
+    throw new AccountingError('הגדרה לא נתמכת', { code: 'validation' });
+  }
   if (settings?.customerSyncMinutes !== undefined && !CUSTOMER_SYNC_MINUTES.includes(Number(settings.customerSyncMinutes))) {
     throw new AccountingError('תדירות סנכרון לא נתמכת', { code: 'validation' });
   }
-  res.json(connections.updateConnection(idParam(req), { label, environment, credentials, webhookSecret, enabled, settings }));
+  res.json(connections.updateConnection(idParam(req), { label, environment, credentials, enabled, settings }));
 }));
+
+router.get('/connections/:id/webhook', wrap(async (req, res) => {
+  const id = idParam(req);
+  res.json({ ...webhookConfig.webhookView(id), health: webhookHealth.webhookHealth(id), deliveries: webhookHealth.listDeliveries({ connectionId: id, pageSize: 20 }).items });
+}));
+
+// Returns the new secret this one time; it cannot be read back later.
+router.post('/connections/:id/webhook/secret', wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store').json(webhookConfig.createSecret(idParam(req)));
+}));
+
+router.post('/connections/:id/webhook/token', wrap(async (req, res) => {
+  res.json(webhookConfig.rotateToken(idParam(req)));
+}));
+
+router.get('/webhook-deliveries', (req, res) => {
+  const { connectionId, outcome, page, pageSize } = req.query;
+  res.json(webhookHealth.listDeliveries({ connectionId, outcome, page, pageSize }));
+});
+
+// Runs the job of an accepted delivery again (the body is not kept; the job holds the referenced ID).
+router.post('/webhook-deliveries/:id/replay', wrap(async (req, res) => {
+  const delivery = webhookHealth.getDelivery(idParam(req));
+  if (!delivery || delivery.outcome !== 'accepted') throw new AccountingError('אפשר להריץ שוב רק אירוע שהתקבל', { code: 'conflict' });
+  const original = delivery.job_id ? queue.getJob(delivery.job_id) : null;
+  if (!original) throw new AccountingError('המשימה המקורית כבר נמחקה מהתור (נשמרת 30 יום)', { code: 'conflict' });
+  const { job } = queue.enqueue({ type: original.type, source: 'replay', connectionId: original.connection_id, payload: original.payload });
+  kick();
+  res.status(202).json({ jobId: job.id });
+}));
+
+router.get('/health', (req, res) => {
+  const webhooks = connections.listConnections()
+    .filter((c) => getProvider(c.provider).capabilities.webhooks)
+    .map((c) => ({ connectionId: c.id, label: c.label, ...webhookHealth.webhookHealth(c.id) }));
+  res.json({ queue: queue.counts(), webhooks });
+});
 
 router.delete('/connections/:id', wrap(async (req, res) => {
   connections.deleteConnection(idParam(req));
