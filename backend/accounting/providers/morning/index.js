@@ -108,6 +108,25 @@ const morning = {
     return (r?.items ?? []).map(toCanonicalDocument);
   },
 
+  /**
+   * Deletes a client card. Morning deletes only an inactive card with no documents, payment tokens or
+   * recurring charges, so an active card is deactivated first and reactivated if the delete is refused.
+   * @returns {Promise<'deleted' | 'not_found'>}
+   */
+  async deleteCustomer(conn, externalId, { active = true } = {}, deps) {
+    const client = clientFor(conn, deps);
+    const path = `/clients/${encodeURIComponent(externalId)}`;
+    try {
+      if (active) await client.request('PUT', path, { active: false });
+      await client.request('DELETE', path);
+      return 'deleted';
+    } catch (err) {
+      if (err.code === 'not_found') return 'not_found';
+      if (active) await client.request('PUT', path, { active: true }).catch(() => {});
+      throw err;
+    }
+  },
+
   /** One client, or null when Morning no longer has it. */
   async getCustomer(conn, externalId, deps) {
     try {

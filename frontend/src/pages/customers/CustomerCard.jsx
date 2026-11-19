@@ -1,9 +1,10 @@
 // Customer card: who the customer is, how they were identified, purchase summary, every document
 // with its payments, the Morning client card (if any) and the change history.
 import { useEffect, useState } from 'react';
-import { ArrowRight, Phone, Mail, FileText, ExternalLink, History, CreditCard, IdCard, FilePlus2 } from 'lucide-react';
+import { ArrowRight, Phone, Mail, FileText, ExternalLink, History, CreditCard, IdCard, FilePlus2, Trash2 } from 'lucide-react';
 import { api, STATIC_DEMO } from '../../api.js';
 import NewOrderForm from './NewOrderForm.jsx';
+import DeleteCustomerDialog from './DeleteCustomerDialog.jsx';
 import { fmtNum, fmtDateTime } from '../../constants.js';
 import { Card, Empty, ErrorNote, Spinner } from '../../components/ui.jsx';
 import { IDENTIFIED, MATCH, KINDS, DOC_STATUS, ACTIONS, SOURCES, fmtMoney, fmtDay, methodLabel } from './customerFormat.js';
@@ -23,6 +24,7 @@ export default function CustomerCard({ id, onBack }) {
   const [error, setError] = useState(null);
   const [ordering, setOrdering] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setC(null);
@@ -51,7 +53,12 @@ export default function CustomerCard({ id, onBack }) {
               {!c.phone && !c.email && <span className="text-charcoal-400">אין טלפון או מייל (הקבלות ב-Morning כוללות רק שם)</span>}
             </div>
           </div>
-          {!STATIC_DEMO && <button className="btn-primary" onClick={() => setOrdering(true)}><FilePlus2 className="h-4 w-4" /> הזמנה חדשה ללקוח</button>}
+          {!STATIC_DEMO && (
+            <div className="flex flex-wrap gap-2">
+              <button className="btn-primary" onClick={() => setOrdering(true)}><FilePlus2 className="h-4 w-4" /> הזמנה חדשה ללקוח</button>
+              <button className="btn-secondary text-red-700" onClick={() => setDeleting(true)}><Trash2 className="h-4 w-4" /> מחיקת לקוח</button>
+            </div>
+          )}
         </div>
         {!STATIC_DEMO && (
           <NewOrderForm
@@ -61,6 +68,7 @@ export default function CustomerCard({ id, onBack }) {
             onIssued={() => setReloadKey((k) => k + 1)}
           />
         )}
+        {!STATIC_DEMO && <DeleteCustomerDialog customerId={deleting ? c.id : null} onClose={() => setDeleting(false)} onDeleted={onBack} />}
         <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Stat label="רכישות" value={fmtNum(c.purchases)} />
           <Stat label="סה״כ" value={fmtMoney(c.total)} />

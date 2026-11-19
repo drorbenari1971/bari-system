@@ -48,5 +48,6 @@ export const ACTIONS = {
   'customer.identity_linked': 'זוהה כלקוח קיים',
   'customer.removed_in_source': 'הוסר ב-Morning',
   'customer.restored_in_source': 'חזר ב-Morning',
+  'customer.deleted': 'הלקוח נמחק',
 };
 export const SOURCES = { manual: 'ידני', polling: 'סנכרון תקופתי', system: 'מערכת', webhook: 'Webhook', replay: 'הרצה חוזרת' };

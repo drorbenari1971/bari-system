@@ -1,8 +1,10 @@
-// "לקוחות": headline numbers, search, filters, sorting, Excel export, and the customers table.
+// "לקוחות": headline numbers, search, filters, sorting, Excel export, and the customers table
+// (with a delete button on each row).
 import { useEffect, useState } from 'react';
-import { Users, Repeat, Wallet, UserRound, Search, Download, ChevronLeft, ChevronRight, FilePlus2 } from 'lucide-react';
+import { Users, Repeat, Wallet, UserRound, Search, Download, ChevronLeft, ChevronRight, FilePlus2, Trash2 } from 'lucide-react';
 import NewOrderForm from './NewOrderForm.jsx';
 import OrdersAttention from './OrdersAttention.jsx';
+import DeleteCustomerDialog from './DeleteCustomerDialog.jsx';
 import { api, STATIC_DEMO } from '../../api.js';
 import { fmtNum } from '../../constants.js';
 import { StatCard, Card, Empty, ErrorNote, Spinner } from '../../components/ui.jsx';
@@ -22,6 +24,7 @@ export default function CustomersList({ onOpen }) {
   const [error, setError] = useState(null);
   const [ordering, setOrdering] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => { setQ(query.trim()); setPage(1); }, SEARCH_DELAY_MS);
@@ -52,6 +55,7 @@ export default function CustomersList({ onOpen }) {
       </div>
       {!STATIC_DEMO && <OrdersAttention refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />}
       {!STATIC_DEMO && <NewOrderForm open={ordering} onClose={() => setOrdering(false)} onIssued={() => setRefreshKey((k) => k + 1)} />}
+      {!STATIC_DEMO && <DeleteCustomerDialog customerId={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); setRefreshKey((k) => k + 1); }} />}
       {s && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard icon={Users} label="לקוחות" value={fmtNum(s.customers)} sub={`${fmtNum(s.buyers)} מהם קנו לפחות פעם אחת`} />
@@ -95,6 +99,7 @@ export default function CustomersList({ onOpen }) {
                   <th className="px-3 py-2.5 font-medium">סה"כ</th>
                   <th className="hidden px-3 py-2.5 font-medium sm:table-cell">רכישה אחרונה</th>
                   <th className="hidden px-3 py-2.5 font-medium lg:table-cell">תשלום אחרון</th>
+                  <th className="px-3 py-2.5 font-medium"><span className="sr-only">מחיקה</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-charcoal-100">
@@ -117,6 +122,14 @@ export default function CustomersList({ onOpen }) {
                       <td className="px-3 py-3 font-medium">{fmtMoney(c.total)}</td>
                       <td className="hidden px-3 py-3 text-charcoal-600 sm:table-cell">{fmtDay(c.lastDate)}</td>
                       <td className="hidden px-3 py-3 text-charcoal-600 lg:table-cell">{methodLabel(c.lastMethod, c.lastApp) || '—'}</td>
+                      <td className="px-3 py-3 text-left">
+                        {!STATIC_DEMO && (
+                          <button className="btn-ghost px-2 py-1 text-charcoal-400 hover:text-red-600" title="מחיקת לקוח" aria-label={`מחיקת ${c.name || 'לקוח'}`}
+                            onClick={(e) => { e.stopPropagation(); setDeleting(c.id); }}>
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}

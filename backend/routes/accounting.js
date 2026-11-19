@@ -13,6 +13,7 @@ import * as flags from '../accounting/flags.js';
 import * as customers from '../accounting/customersQuery.js';
 import { dashboard } from '../accounting/bi.js';
 import * as orders from '../accounting/orders.js';
+import * as customerDelete from '../accounting/customerDelete.js';
 import { CUSTOMER_SYNC_MINUTES } from '../accounting/polling.js';
 import { AccountingError } from '../accounting/errors.js';
 
@@ -147,6 +148,8 @@ router.get('/customers/export.csv', wrap(async (req, res) => {
 }));
 
 router.get('/customers/:id', wrap(async (req, res) => res.json(customers.getCustomerCard(idParam(req)))));
+router.get('/customers/:id/delete-plan', wrap(async (req, res) => res.json(customerDelete.deletePlan(idParam(req)))));
+router.delete('/customers/:id', wrap(async (req, res) => res.json(await customerDelete.deleteCustomer(idParam(req)))));
 
 // Business dashboard (stage 5).
 router.get('/bi/dashboard', wrap(async (req, res) => {

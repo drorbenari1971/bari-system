@@ -5,6 +5,7 @@ import { db, nowIso } from '../db.js';
 import { contentHash, productKey } from './model.js';
 import { resolveDocumentCustomer } from './identity.js';
 import { tx } from './tx.js';
+import { isDeleted } from './customerDelete.js';
 import * as audit from './audit.js';
 
 const getDoc = db.prepare('SELECT * FROM acc_documents WHERE connection_id = ? AND external_id = ?');
@@ -83,10 +84,12 @@ function auditCustomer(resolved, d, base) {
  * @param {number} connectionId
  * @param {import('./model.js').CanonicalDocument} d
  * @param {{ source: string, jobId?: number }} ctx
+ * A document of a customer the owner deleted here is skipped ('unchanged').
  * @returns {'added' | 'updated' | 'unchanged'}
  */
 export function upsertDocument(connectionId, d, { source, jobId = null }) {
   if (!d.externalId) throw new Error('מסמך בלי מזהה');
+  if (isDeleted(connectionId, 'document', d.externalId)) return 'unchanged';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) throw new Error(`מסמך ${d.number}: תאריך לא תקין`);
   return tx(() => {
     const existing = getDoc.get(connectionId, d.externalId);

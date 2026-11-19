@@ -369,4 +369,15 @@ CREATE TABLE IF NOT EXISTS acc_orders (
   updated_at           TEXT NOT NULL DEFAULT ${NOW}
 );
 CREATE INDEX IF NOT EXISTS idx_acc_orders_status ON acc_orders(status, id);
+
+-- Provider records of customers the owner deleted here ("מחיקת לקוח"): syncs and webhooks skip them,
+-- so a deleted customer and its receipts do not come back.
+CREATE TABLE IF NOT EXISTS acc_deleted_records (
+  connection_id INTEGER NOT NULL REFERENCES acc_connections(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL,     -- customer | document
+  external_id   TEXT NOT NULL,
+  customer_id   INTEGER,           -- the deleted local customer (no reference: it no longer exists)
+  deleted_at    TEXT NOT NULL DEFAULT ${NOW},
+  PRIMARY KEY (connection_id, kind, external_id)
+);
 `);

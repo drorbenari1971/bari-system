@@ -43,6 +43,7 @@
  * Required when capabilities.issuesReceipts is true (see providers/morning/index.js):
  *   listItems(conn), createCustomer(conn, customer), previewReceipt(conn, order), createReceipt(conn, order),
  *   findReceipts(conn, { clientId, date }). Create calls mark failures that may have gone through with err.uncertain.
+ * Optional: deleteCustomer(conn, externalId, { active }) -> 'deleted' | 'not_found' ("מחיקת לקוח").
  * @property {object} [webhooks]  required when capabilities.webhooks is true:
  *   { SECRET_LENGTH, KEPT_HEADERS, supportedTopics(), verifySignature(secret, rawBody, signature),
  *     describeDelivery(headers), readDelivery(topic, rawBody) } (see providers/morning/webhooks.js)

@@ -5,6 +5,7 @@ import { db, nowIso } from '../db.js';
 import { contentHash, normalizePhone } from './model.js';
 import { resolveCustomer, linkIdentities } from './identity.js';
 import { tx } from './tx.js';
+import { isDeleted } from './customerDelete.js';
 import * as audit from './audit.js';
 
 const getRecord = db.prepare('SELECT * FROM acc_customer_records WHERE connection_id = ? AND external_id = ?');
@@ -83,10 +84,12 @@ const restoredEntry = (base, customerId) => ({ ...base, action: 'customer.restor
  * @param {number} connectionId
  * @param {import('./model.js').CanonicalCustomer} c
  * @param {{ source: string, jobId?: number, runId?: number }} ctx
+ * A record of a customer the owner deleted here is skipped ('unchanged').
  * @returns {'added' | 'updated' | 'unchanged'}
  */
 export function upsertCustomerRecord(connectionId, c, { source, jobId = null, runId = null }) {
   if (!c.externalId) throw new Error('רשומת לקוח בלי מזהה');
+  if (isDeleted(connectionId, 'customer', c.externalId)) return 'unchanged';
   return tx(() => {
     const existing = getRecord.get(connectionId, c.externalId);
     const now = nowIso();

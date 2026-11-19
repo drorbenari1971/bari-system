@@ -93,7 +93,10 @@ export class MorningClient {
         err.uncertain = true;
         throw err;
       }
-      if (res.ok) return res.status === 204 ? null : res.json();
+      if (res.ok) {
+        const text = await res.text(); // DELETE answers 200 with an empty body
+        return text ? JSON.parse(text) : null;
+      }
 
       const json = await res.json().catch(() => ({}));
       if (res.status === 401 && !renewed) {
