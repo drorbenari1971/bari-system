@@ -9,6 +9,7 @@ import Engagement from './pages/Engagement.jsx';
 import Tasks from './pages/Tasks.jsx';
 import Finance from './pages/Finance.jsx';
 import Leads from './pages/Leads.jsx';
+import CustomersPage from './pages/customers/CustomersPage.jsx';
 import { api, STATIC_DEMO } from './api.js';
 
 const StatusContext = createContext({ status: null, refreshStatus: () => {} });
@@ -63,6 +64,7 @@ export default function App() {
               <Route path="/tasks" element={<Tasks />} />
               <Route path="/finance" element={<Finance />} />
               <Route path="/leads" element={<Leads />} />
+              <Route path="/customers" element={<CustomersPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

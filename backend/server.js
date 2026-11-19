@@ -17,6 +17,8 @@ import webhooksRouter from './routes/webhooks.js';
 import financeRouter from './routes/finance.js';
 import leadsRouter from './routes/leads.js';
 import { airtableConfigured } from './services/airtable.js';
+import accountingRouter from './routes/accounting.js';
+import { startAccounting } from './accounting/index.js';
 
 if (env('SEED_DEMO', 'true') === 'true') {
   seedDemoIfEmpty();
@@ -90,6 +92,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api/engagement', engagementRouter);
 app.use('/api/finance', financeRouter);
 app.use('/api/leads', leadsRouter);
+app.use('/api/accounting', accountingRouter);
 app.use('/webhooks', webhooksRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'נתיב API לא קיים' }));
@@ -113,4 +116,5 @@ app.listen(PORT, '127.0.0.1', () => {
   console.log(`  Claude: ${claudeConfigured() ? 'connected' : 'demo'} | Images: ${imagesConfigured() ? 'connected' : 'demo'} | Facebook: ${metaConfigured() ? 'connected' : 'simulation'} | Instagram: ${igConfigured() ? 'connected' : 'simulation'}`);
   if (!fs.existsSync(DIST)) console.log('  (frontend not built yet - run setup.bat, or dev.bat for hot-reload on :5173)');
   startScheduler();
+  startAccounting();
 });

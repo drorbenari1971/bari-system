@@ -296,6 +296,17 @@ const routes = [
     return { ok: true };
   }],
 
+  // accounting connections (backend/routes/accounting.js): the demo can't connect to a real provider
+  ['GET', /^\/accounting\/providers$/, () => [{
+    id: 'morning', label: 'Morning (חשבונית ירוקה)',
+    environments: { production: { label: 'אמיתית (Production)' }, sandbox: { label: 'בדיקות (Sandbox)' } },
+    credentialFields: [{ key: 'clientId', label: 'Client ID', secret: false }, { key: 'clientSecret', label: 'Client Secret', secret: true }],
+    capabilities: { webhooks: true, lineItems: true, pdfLinks: true, updatedSinceFilter: false, documentUpdateEvents: false },
+  }]],
+  ['GET', /^\/accounting\/connections$/, () => []],
+  ['POST', /^\/accounting\/connections$/, () => fail('גרסת הדגמה בדפדפן – אי אפשר להתחבר למערכת הנהלת חשבונות')],
+  ['GET', /^\/accounting\/audit$/, () => ({ items: [], total: 0, page: 1, pageSize: 20 })],
+
   // leads (backend/routes/leads.js syncs these from Airtable; the demo has fictional ones and no sync)
   ['GET', /^\/leads$/, (db) => ({
     configured: false, syncedAt: null, syncError: null, statuses: LEAD_STATUSES,
