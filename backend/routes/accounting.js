@@ -1,4 +1,4 @@
-// /api/accounting: provider connections, customer sync, queue, flags and audit log (local only).
+// /api/accounting: provider connections, sync, webhooks, customers screen, queue, flags and audit log (local only).
 import { Router } from 'express';
 import { listProviders, getProvider } from '../accounting/providers/index.js';
 import * as webhookConfig from '../accounting/webhookConfig.js';
@@ -10,6 +10,7 @@ import * as audit from '../accounting/audit.js';
 import { kick } from '../accounting/worker.js';
 import * as sync from '../accounting/sync.js';
 import * as flags from '../accounting/flags.js';
+import * as customers from '../accounting/customersQuery.js';
 import { CUSTOMER_SYNC_MINUTES } from '../accounting/polling.js';
 import { AccountingError } from '../accounting/errors.js';
 
@@ -126,6 +127,24 @@ router.get('/sync-runs', (req, res) => {
     latest: Object.fromEntries(RUN_TYPES.map((t) => [t, sync.latestRun(id, t)])),
   });
 });
+
+// Customers screen (stage 4).
+router.get('/customers', wrap(async (req, res) => {
+  const { q, segment, sort, page, pageSize } = req.query;
+  res.json({ ...customers.listCustomers({ q, segment, sort, page, pageSize }), summary: customers.customersSummary() });
+}));
+
+router.get('/customers/export.csv', wrap(async (req, res) => {
+  const { q, segment, sort } = req.query;
+  const csv = customers.exportCustomersCsv({ q, segment, sort });
+  res.set({
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="customers-${new Date().toISOString().slice(0, 10)}.csv"`,
+    'Cache-Control': 'no-store',
+  }).send(csv);
+}));
+
+router.get('/customers/:id', wrap(async (req, res) => res.json(customers.getCustomerCard(idParam(req)))));
 
 router.get('/flags', (req, res) => res.json(flags.listFlags()));
 
