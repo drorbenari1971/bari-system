@@ -333,11 +333,20 @@ erDiagram
 | `acc_document_payments` | `document_id`, `row`, `method`, `label`, `app`, `amount` |
 | `customers` | `id`, `display_name`, `phone`, `phone_norm`, `email`, `created_at`, `updated_at` |
 | `customer_identities` | `customer_id`, `connection_id`, `kind` (`external_id`/`phone`/`name`), `value`. **ייחודי** לכל `(connection_id, kind, value)`. כך לקוח אחד יכול להופיע בכמה ספקים |
+| `acc_customer_records` | (שלב 2) הלקוח כפי שהוא אצל הספק: `connection_id` + `external_id` (**ייחודי**), `customer_id`, שם, טלפונים, מיילים, ח"פ, כתובת, איש קשר, `active`, תוויות, הערות, `income_agorot`/`payment_agorot`/`balance_agorot` (מחושבים אצל הספק), `source_created_at`, `source_updated_at`, `raw` (בלי פרטי בנק), `content_hash`, `last_seen_run_id`, `missing_runs`, `removed_at`. **פרטי בנק לא נשמרים** |
 | `acc_webhook_archive` | ארכיון גולמי, לקריאה בלבד (סעיף 6.1). אינדקסים: `delivery_id`, `received_at`, `topic` |
 | `acc_feature_flags` | `key`, `enabled`, `updated_at`, `updated_by` (סעיף 18) |
 | `acc_jobs` | סעיף 7 |
 | `acc_audit_log` | סעיף 9 |
-| `acc_sync_runs` | ריצת התאמה: `type`, `source`, `started_at`, `finished_at`, `fetched`/`added`/`updated`/`unchanged`/`failed`, `error` |
+| `acc_sync_runs` | ריצת התאמה: `type`, `source`, `status` (running/completed/failed/cancelled), `started_at`, `finished_at`, `page_size`, `pages`, `fetched`/`added`/`updated`/`unchanged`/`failed`/`removed`, `item_errors`, `error` |
+
+**סנכרון לקוחות (שלב 2):**
+- **מקור:** `POST /clients/search` בדפים של 100. ל-Morning אין סינון או מיון לפי `lastUpdateDate`, ולכן כל ריצה קוראת את כל הדפים, ורק שינוי אמיתי (`content_hash`) נכתב ונרשם ב-Audit.
+- **משימות:** `customers_sync` → `customers_page` (דף אחד לכל משימה) → `customers_finalize`. ‏`fetch_customer` מושך לקוח בודד, וישמש את ה-Webhook של `client/created`.
+- **תזמון:** סנכרון ראשון אחרי בדיקת חיבור מוצלחת, ואחר כך כל 15 דקות, שעה (ברירת מחדל) או 6 שעות. נשלט על ידי `polling` ו-`autoSync`.
+- **זיהוי לקוח:** מזהה הספק, ואחר כך טלפון מנורמל. **שם בלבד לא מאחד לקוחות.**
+- **Audit:** `customer.created`, `customer.updated`, `customer.deactivated`, `customer.reactivated`, `customer.identity_linked`, `customer.removed_in_source`, `customer.restored_in_source`. שינוי רק בסכומים המחושבים נשמר, אבל לא נרשם, כי הוא נגזר ממסמכים.
+- **הסרה:** לקוח שלא הוחזר בשתי ריצות מלאות ברצף מסומן "הוסר במקור" ולא נמחק. אם ריצה החזירה פחות מחצי מהלקוחות המוכרים, או שחלק מהלקוחות לא נשמרו, סימון ההסרה מדולג.
 | `sales_facts` | שורה לכל מסמך שנחשב עסקה: `document_id`, `date`, `customer_id`, `gross`, `net` (בחשבונית זיכוי: שלילי), `method`, `deal_count` (1, או 0 בזיכוי) |
 | `sales_fact_lines` | `document_id`, `date`, `customer_id`, `product_key`, `quantity`, `gross`, `net` |
 | `bi_daily` | לפי `date`: `gross`, `net`, `deals`, `customers`, `new_customers` |

@@ -271,3 +271,58 @@ CREATE TABLE IF NOT EXISTS bi_meta (
   value TEXT NOT NULL
 );
 `);
+
+db.exec(`
+-- A customer record exactly as one provider knows it (stage 2: customer sync). Several records can
+-- belong to one local customer. Bank details are never stored, not even in raw.
+CREATE TABLE IF NOT EXISTS acc_customer_records (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  connection_id     INTEGER NOT NULL REFERENCES acc_connections(id),
+  external_id       TEXT NOT NULL,
+  customer_id       INTEGER NOT NULL REFERENCES customers(id),
+  name              TEXT NOT NULL DEFAULT '',
+  phone             TEXT NOT NULL DEFAULT '',
+  mobile            TEXT NOT NULL DEFAULT '',
+  emails            TEXT NOT NULL DEFAULT '[]',
+  tax_id            TEXT NOT NULL DEFAULT '',
+  address           TEXT NOT NULL DEFAULT '',
+  city              TEXT NOT NULL DEFAULT '',
+  zip               TEXT NOT NULL DEFAULT '',
+  country           TEXT NOT NULL DEFAULT '',
+  contact_person    TEXT NOT NULL DEFAULT '',
+  department        TEXT NOT NULL DEFAULT '',
+  active            INTEGER NOT NULL DEFAULT 1,
+  labels            TEXT NOT NULL DEFAULT '[]',
+  remarks           TEXT NOT NULL DEFAULT '',
+  income_agorot     INTEGER NOT NULL DEFAULT 0,
+  payment_agorot    INTEGER NOT NULL DEFAULT 0,
+  balance_agorot    INTEGER NOT NULL DEFAULT 0,
+  source_created_at TEXT,
+  source_updated_at TEXT,
+  raw               TEXT NOT NULL DEFAULT '{}',
+  content_hash      TEXT NOT NULL DEFAULT '',
+  first_seen_at     TEXT NOT NULL DEFAULT ${NOW},
+  synced_at         TEXT NOT NULL DEFAULT ${NOW},
+  last_seen_run_id  INTEGER,
+  missing_runs      INTEGER NOT NULL DEFAULT 0,  -- complete sync runs in a row that did not return it
+  removed_at        TEXT,                        -- set after 2 such runs; the record is kept
+  UNIQUE (connection_id, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_acc_customer_records_customer ON acc_customer_records(customer_id);
+`);
+
+// Columns added to tables created by an earlier version (CREATE TABLE IF NOT EXISTS does not alter).
+function addColumns(table, columns) {
+  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [name, def] of Object.entries(columns)) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+  }
+}
+addColumns('acc_sync_runs', {
+  status: "TEXT NOT NULL DEFAULT 'running'", // running | completed | failed | cancelled
+  page_size: 'INTEGER NOT NULL DEFAULT 100',
+  pages: 'INTEGER NOT NULL DEFAULT 0',
+  removed: 'INTEGER NOT NULL DEFAULT 0',
+  item_errors: "TEXT NOT NULL DEFAULT '[]'", // first few per-record errors: [{ externalId, error }]
+});
+db.exec('CREATE INDEX IF NOT EXISTS idx_acc_sync_runs_conn ON acc_sync_runs(connection_id, type, id)');

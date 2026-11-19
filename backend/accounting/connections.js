@@ -128,16 +128,19 @@ export function updateConnection(id, { label, environment, credentials = {}, web
   return getConnectionView(id);
 }
 
-/** Removes a connection that has no synced documents yet; otherwise it must be disabled instead. */
+/** Removes a connection that has no synced documents or customers yet; otherwise it must be disabled instead. */
 export function deleteConnection(id, source = 'manual') {
   const current = row(id);
   if (!current) throw new AccountingError('החיבור לא נמצא', { code: 'not_found', status: 404 });
   const docs = db.prepare('SELECT COUNT(*) AS n FROM acc_documents WHERE connection_id = ?').get(id).n;
   if (docs) throw new AccountingError(`לחיבור יש ${docs} מסמכים מסונכרנים. אפשר להשבית אותו במקום למחוק.`, { code: 'conflict', status: 409 });
+  const customers = db.prepare('SELECT COUNT(*) AS n FROM acc_customer_records WHERE connection_id = ?').get(id).n;
+  if (customers) throw new AccountingError(`לחיבור יש ${customers} לקוחות מסונכרנים. אפשר להשבית אותו במקום למחוק.`, { code: 'conflict', status: 409 });
   db.exec('BEGIN');
   try {
     audit.record({ action: 'connection.deleted', source, entityType: 'connection', entityId: id, before: auditView(current) });
     db.prepare('DELETE FROM acc_jobs WHERE connection_id = ?').run(id);
+    db.prepare('DELETE FROM acc_sync_runs WHERE connection_id = ?').run(id);
     db.prepare('DELETE FROM acc_connections WHERE id = ?').run(id);
     db.exec('COMMIT');
   } catch (err) {

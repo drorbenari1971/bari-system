@@ -31,9 +31,14 @@
  * @property {ProviderCapabilities} capabilities
  * @property {(conn: Connection) => Promise<{ ok: true, details: string }>} testConnection
  *   Throws AccountingError when the connection does not work.
+ * @property {(conn: Connection, opts: { page: number, pageSize: number }) =>
+ *   Promise<{ items: import('../model.js').CanonicalCustomer[], page: number, pageSize: number, total: number, pages: number }>} listCustomers
+ *   One page of customers, in the provider's own order.
+ * @property {(conn: Connection, externalId: string) => Promise<import('../model.js').CanonicalCustomer|null>} getCustomer
+ *   null when the provider no longer has the customer.
  */
 
-const REQUIRED_FUNCTIONS = ['testConnection'];
+const REQUIRED_FUNCTIONS = ['testConnection', 'listCustomers', 'getCustomer'];
 const CAPABILITY_KEYS = ['webhooks', 'lineItems', 'pdfLinks', 'updatedSinceFilter', 'documentUpdateEvents'];
 
 /** Fails fast at startup if a provider does not implement the contract. */

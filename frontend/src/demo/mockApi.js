@@ -306,6 +306,11 @@ const routes = [
   ['GET', /^\/accounting\/connections$/, () => []],
   ['POST', /^\/accounting\/connections$/, () => fail('גרסת הדגמה בדפדפן – אי אפשר להתחבר למערכת הנהלת חשבונות')],
   ['GET', /^\/accounting\/audit$/, () => ({ items: [], total: 0, page: 1, pageSize: 20 })],
+  ['GET', /^\/accounting\/flags$/, () => [
+    ['webhooks', 'קבלת אירועים מ-Morning (Webhooks)'], ['polling', 'סנכרון תקופתי'], ['autoSync', 'כל התזמונים האוטומטיים'],
+    ['biCache', 'סיכומי BI מוכנים מראש'], ['liveDashboard', 'עדכונים חיים במסכים'],
+  ].map(([key, label]) => ({ key, label, enabled: true, lockedByEnv: false }))],
+  ['PUT', /^\/accounting\/flags\/[\w]+$/, () => fail('גרסת הדגמה בדפדפן – אי אפשר לשנות מתגים')],
 
   // leads (backend/routes/leads.js syncs these from Airtable; the demo has fictional ones and no sync)
   ['GET', /^\/leads$/, (db) => ({

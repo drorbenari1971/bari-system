@@ -1,6 +1,6 @@
-// "סנכרון והגדרות": connection to the accounting provider, connection test and change history.
+// "סנכרון והגדרות": connection to the accounting provider, customer sync, feature flags and change history.
 import { useCallback, useEffect, useState } from 'react';
-import { PlugZap, Pencil, Trash2, CheckCircle2, XCircle, CircleDashed, History, Plus } from 'lucide-react';
+import { PlugZap, Pencil, Trash2, CheckCircle2, XCircle, CircleDashed, History, Plus, RefreshCw, Users, ToggleRight } from 'lucide-react';
 import { api } from '../../api.js';
 import { fmtDateTime } from '../../constants.js';
 import { Card, Empty, ErrorNote, Notice, Spinner } from '../../components/ui.jsx';
@@ -15,7 +15,26 @@ const ACTION_LABEL = {
   'connection.created': 'נוצר חיבור',
   'connection.updated': 'החיבור עודכן',
   'connection.deleted': 'החיבור נמחק',
+  'customer.created': 'לקוח חדש',
+  'customer.updated': 'פרטי לקוח עודכנו',
+  'customer.deactivated': 'לקוח סומן כלא פעיל',
+  'customer.reactivated': 'לקוח חזר להיות פעיל',
+  'customer.identity_linked': 'רשומה צורפה ללקוח קיים (לפי טלפון)',
+  'customer.removed_in_source': 'לקוח הוסר ב-Morning',
+  'customer.restored_in_source': 'לקוח חזר ב-Morning',
+  'flag.changed': 'מתג שונה',
 };
+
+const SOURCE_LABEL = { manual: 'ידני', polling: 'סנכרון תקופתי', system: 'מערכת', webhook: 'Webhook', replay: 'הרצה חוזרת' };
+
+const RUN_STATUS = {
+  running: { label: 'רץ עכשיו', cls: 'text-sky-700' },
+  completed: { label: 'הושלם', cls: 'text-sage-700' },
+  failed: { label: 'נכשל', cls: 'text-red-600' },
+  cancelled: { label: 'בוטל', cls: 'text-amber-700' },
+};
+
+const SYNC_INTERVALS = [{ value: 15, label: 'כל 15 דקות' }, { value: 60, label: 'כל שעה' }, { value: 360, label: 'כל 6 שעות' }];
 
 export default function SyncSettings() {
   const [providers, setProviders] = useState(null);
@@ -33,6 +52,7 @@ export default function SyncSettings() {
     } catch (e) { setError(e.message); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  const refreshAudit = useCallback(() => setAuditKey((k) => k + 1), []);
 
   if (!providers || !connections) {
     return error ? <ErrorNote error={error} /> : <div className="grid h-40 place-items-center"><Spinner className="h-6 w-6 text-sage-500" /></div>;
@@ -54,18 +74,19 @@ export default function SyncSettings() {
           />
         ) : connections.length ? (
           <ul className="space-y-4">
-            {connections.map((c) => <ConnectionRow key={c.id} connection={c} onEdit={() => setEditing(c)} onChanged={load} />)}
+            {connections.map((c) => <ConnectionRow key={c.id} connection={c} onEdit={() => setEditing(c)} onChanged={load} onSynced={refreshAudit} />)}
           </ul>
         ) : (
           <Empty icon={PlugZap} title="אין עדיין חיבור">לחצו "חיבור חדש" והזינו את פרטי ה-API מ-Morning</Empty>
         )}
       </Card>
+      <FlagsCard onChanged={refreshAudit} />
       <ChangeHistory refreshKey={auditKey} />
     </div>
   );
 }
 
-function ConnectionRow({ connection: c, onEdit, onChanged }) {
+function ConnectionRow({ connection: c, onEdit, onChanged, onSynced }) {
   const [busy, setBusy] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -117,6 +138,7 @@ function ConnectionRow({ connection: c, onEdit, onChanged }) {
         ? <div className="mt-3 rounded-xl border border-sage-200 bg-sage-50 px-3 py-2 text-sm text-sage-800">{result.text}</div>
         : <div className="mt-3"><ErrorNote error={result.text} /></div>)}
       {error && <div className="mt-3"><ErrorNote error={error} /></div>}
+      <CustomerSync connection={c} onChanged={onChanged} onSynced={onSynced} />
     </li>
   );
 }
@@ -211,15 +233,139 @@ function ChangeHistory({ refreshKey }) {
             <li key={a.id} className="px-5 py-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{ACTION_LABEL[a.action] ?? a.action}</span>
-                <span className="text-xs text-charcoal-400">{fmtDateTime(a.at)} · {a.source === 'manual' ? 'ידני' : a.source}</span>
+                {(a.after?.name ?? a.before?.name) && <span className="text-charcoal-600" dir="auto">{a.after?.name ?? a.before?.name}</span>}
+                <span className="text-xs text-charcoal-400">{fmtDateTime(a.at)} · {SOURCE_LABEL[a.source] ?? a.source}</span>
               </div>
-              {a.changes.length > 0 && (
+              {a.before && a.changes.length > 0 && (
                 <p className="mt-0.5 text-xs text-charcoal-500" dir="auto">{a.changes.map((ch) => ch.field).join(', ')}</p>
               )}
             </li>
           ))}
         </ul>
       ) : <Empty icon={History} title="אין עדיין שינויים" />}
+    </Card>
+  );
+}
+
+const WAIT_FOR_RUN_MS = 60_000; // a requested sync that never starts a run (e.g. one was already running)
+
+function CustomerSync({ connection: c, onChanged, onSynced }) {
+  const [data, setData] = useState(null);
+  const [requested, setRequested] = useState(null); // { at, lastRunId } until the new run shows up
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get(`/accounting/sync-runs?connectionId=${c.id}&pageSize=1`);
+      setData(r);
+      return r.items[0] ?? null;
+    } catch (e) { setError(e.message); return null; }
+  }, [c.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const run = data?.items[0];
+  const running = run?.status === 'running';
+  const busy = !!requested || running;
+
+  useEffect(() => {
+    if (!busy) return undefined;
+    const t = setInterval(async () => {
+      const latest = await load();
+      if (requested && ((latest && latest.id !== requested.lastRunId) || Date.now() - requested.at > WAIT_FOR_RUN_MS)) setRequested(null);
+    }, 2000);
+    return () => clearInterval(t);
+  }, [busy, requested, load]);
+
+  // When a run ends, the change history has new entries.
+  const [wasRunning, setWasRunning] = useState(false);
+  useEffect(() => {
+    if (wasRunning && !running) onSynced();
+    setWasRunning(running);
+  }, [running, wasRunning, onSynced]);
+
+  const syncNow = async () => {
+    setError(null);
+    try {
+      await api.post(`/accounting/connections/${c.id}/sync`);
+      setRequested({ at: Date.now(), lastRunId: run?.id ?? null });
+    } catch (e) { setError(e.message); }
+  };
+  const changeInterval = async (e) => {
+    setError(null);
+    try {
+      await api.put(`/accounting/connections/${c.id}`, { settings: { customerSyncMinutes: Number(e.target.value) } });
+      await onChanged();
+    } catch (err) { setError(err.message); }
+  };
+
+  const status = RUN_STATUS[run?.status];
+  return (
+    <div className="mt-4 border-t border-charcoal-100 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Users className="h-4 w-4 text-sage-500" /> סנכרון לקוחות
+          {data && <span className="chip bg-charcoal-50 text-charcoal-600">{data.knownCustomers.toLocaleString('he-IL')} לקוחות</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="input w-auto py-1.5 text-sm" value={c.settings.customerSyncMinutes ?? 60} onChange={changeInterval} aria-label="תדירות הסנכרון">
+            {SYNC_INTERVALS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
+          </select>
+          <button className="btn-secondary px-3 py-1.5" onClick={syncNow} disabled={busy || !c.enabled}>
+            {busy ? <Spinner /> : <RefreshCw className="h-4 w-4" />} {busy ? 'מסנכרן…' : 'סנכרן עכשיו'}
+          </button>
+        </div>
+      </div>
+      {run ? (
+        <div className="mt-2 text-sm">
+          <span className={status?.cls}>{status?.label ?? run.status}</span>
+          <span className="text-xs text-charcoal-400"> · {fmtDateTime(run.started_at)} · {SOURCE_LABEL[run.source] ?? run.source}</span>
+          <p className="mt-0.5 text-xs text-charcoal-500">
+            נקראו {run.fetched} · נוספו {run.added} · עודכנו {run.updated} · ללא שינוי {run.unchanged}
+            {run.removed > 0 && <> · הוסרו ב-Morning {run.removed}</>}
+            {run.failed > 0 && <span className="text-red-600"> · לא נשמרו {run.failed}</span>}
+          </p>
+          {run.error && <p className={`mt-1 text-xs ${run.status === 'completed' ? 'text-amber-700' : 'text-red-600'}`}>{run.error}</p>}
+        </div>
+      ) : data && (
+        <p className="mt-2 text-xs text-charcoal-500">עדיין לא בוצע סנכרון. הסנכרון הראשון מתחיל לבד אחרי בדיקת חיבור מוצלחת, או בלחיצה על "סנכרן עכשיו".</p>
+      )}
+      {error && <div className="mt-2"><ErrorNote error={error} /></div>}
+    </div>
+  );
+}
+
+function FlagsCard({ onChanged }) {
+  const [flags, setFlags] = useState(null);
+  const [error, setError] = useState(null);
+  const load = useCallback(() => api.get('/accounting/flags').then(setFlags).catch((e) => setError(e.message)), []);
+  useEffect(() => { load(); }, [load]);
+  if (!flags) return error ? <ErrorNote error={error} /> : null;
+
+  const toggle = async (f) => {
+    setError(null);
+    try {
+      await api.put(`/accounting/flags/${f.key}`, { enabled: !f.enabled });
+      await load();
+      onChanged();
+    } catch (e) { setError(e.message); }
+  };
+  return (
+    <Card title={<span className="flex items-center gap-2"><ToggleRight className="h-4 w-4 text-sage-500" /> מתגים</span>}>
+      <ul className="space-y-2">
+        {flags.map((f) => (
+          <li key={f.key} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>
+              {f.label}
+              {!f.enabled && <span className="chip mr-2 bg-amber-50 text-amber-700">כבוי</span>}
+              {f.lockedByEnv && <span className="mr-2 text-xs text-charcoal-400">נעול בקובץ ההגדרות ({f.envName})</span>}
+            </span>
+            <button className={f.enabled ? 'btn-ghost px-3 py-1' : 'btn-secondary px-3 py-1'} onClick={() => toggle(f)} disabled={f.lockedByEnv}>
+              {f.enabled ? 'כבה' : 'הדלק'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <ErrorNote error={error} />
     </Card>
   );
 }

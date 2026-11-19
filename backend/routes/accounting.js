@@ -1,4 +1,4 @@
-// /api/accounting: provider connections, queue and audit log (local only).
+// /api/accounting: provider connections, customer sync, queue, flags and audit log (local only).
 import { Router } from 'express';
 import { listProviders } from '../accounting/providers/index.js';
 import { describeProvider } from '../accounting/providers/base.js';
@@ -6,6 +6,9 @@ import * as connections from '../accounting/connections.js';
 import * as queue from '../accounting/queue.js';
 import * as audit from '../accounting/audit.js';
 import { kick } from '../accounting/worker.js';
+import * as sync from '../accounting/sync.js';
+import * as flags from '../accounting/flags.js';
+import { CUSTOMER_SYNC_MINUTES } from '../accounting/polling.js';
 import { AccountingError } from '../accounting/errors.js';
 
 const router = Router();
@@ -39,6 +42,9 @@ router.post('/connections', wrap(async (req, res) => {
 
 router.put('/connections/:id', wrap(async (req, res) => {
   const { label, environment, credentials, webhookSecret, enabled, settings } = req.body ?? {};
+  if (settings?.customerSyncMinutes !== undefined && !CUSTOMER_SYNC_MINUTES.includes(Number(settings.customerSyncMinutes))) {
+    throw new AccountingError('תדירות סנכרון לא נתמכת', { code: 'validation' });
+  }
   res.json(connections.updateConnection(idParam(req), { label, environment, credentials, webhookSecret, enabled, settings }));
 }));
 
@@ -49,6 +55,29 @@ router.delete('/connections/:id', wrap(async (req, res) => {
 
 router.post('/connections/:id/test', wrap(async (req, res) => {
   res.json(await connections.testConnection(idParam(req)));
+}));
+
+// Manual customer sync. Works even when the schedule is off (flags) - only a disabled connection blocks it.
+router.post('/connections/:id/sync', wrap(async (req, res) => {
+  const id = idParam(req);
+  const conn = connections.getConnectionView(id);
+  if (!conn) throw new AccountingError('החיבור לא נמצא', { code: 'not_found' });
+  if (!conn.enabled) throw new AccountingError('החיבור מושבת. הפעילו אותו כדי לסנכרן.', { code: 'conflict' });
+  const { job, created } = sync.requestCustomerSync(id, 'manual');
+  res.status(created ? 202 : 200).json({ jobId: job.id, alreadyQueued: !created });
+}));
+
+router.get('/sync-runs', (req, res) => {
+  const { connectionId, page, pageSize } = req.query;
+  const result = sync.listRuns({ connectionId, page, pageSize });
+  res.json(connectionId ? { ...result, knownCustomers: sync.knownCustomers(Number(connectionId)) } : result);
+});
+
+router.get('/flags', (req, res) => res.json(flags.listFlags()));
+
+router.put('/flags/:key', wrap(async (req, res) => {
+  if (typeof req.body?.enabled !== 'boolean') throw new AccountingError('ערך לא תקין', { code: 'validation' });
+  res.json(flags.setFlag(req.params.key, req.body.enabled));
 }));
 
 router.get('/jobs', (req, res) => {
