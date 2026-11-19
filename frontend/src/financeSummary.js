@@ -1,8 +1,10 @@
 // Finance calculations and formatting. Amounts are integer agorot, so sums stay exact.
 // Kept in the UI so the local app and the GitHub Pages demo calculate the same way.
 
-const moneyFormat = new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 2, minimumFractionDigits: 0 });
-export const fmtMoney = (agorot) => moneyFormat.format(agorot / 100);
+// The shekel sign always sits to the left of the number (₪19,135, -₪403). The left-to-right isolate
+// (U+2066 ... U+2069) keeps that order inside right-to-left text too.
+const numberFormat = new Intl.NumberFormat('he-IL', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+export const fmtMoney = (agorot) => `\u2066${agorot < 0 ? '-' : ''}₪${numberFormat.format(Math.abs(agorot) / 100)}\u2069`;
 
 const compactFormat = new Intl.NumberFormat('he-IL', { notation: 'compact', maximumFractionDigits: 1 });
 export const fmtMoneyCompact = (agorot) => `₪${compactFormat.format(agorot / 100)}`;
