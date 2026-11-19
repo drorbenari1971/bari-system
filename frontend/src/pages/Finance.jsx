@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine,
 } from 'recharts';
-import { TrendingUp, TrendingDown, Wallet, Percent, Plus, Pencil, Trash2, Receipt } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Percent, Plus, Pencil, Trash2, Receipt, ExternalLink } from 'lucide-react';
 import { api } from '../api.js';
 import { useStatus, useTheme } from '../App.jsx';
 import { PRODUCTS } from '../constants.js';
@@ -98,7 +98,7 @@ export default function Finance() {
     <div className="space-y-6">
       <div>
         <h1 className="page-title">כספים ותזרים</h1>
-        <p className="page-sub">הכנסות, הוצאות ורווחיות לפי תאריך, על בסיס הרשומות שהוזנו</p>
+        <p className="page-sub">הכנסות, הוצאות ורווחיות לפי תאריך: הקבלות מ-Morning נכנסות אוטומטית, והשאר מוזן כאן</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -237,12 +237,21 @@ export default function Finance() {
                 <tr key={r.id} className="hover:bg-sage-50/40">
                   <td className="whitespace-nowrap px-4 py-2.5 text-charcoal-500">{fmtDay(r.date)}</td>
                   <td className="px-4 py-2.5">{KIND_LABEL[r.kind]}</td>
-                  <td className="px-4 py-2.5 font-medium">{r.category} {r.is_demo && <DemoBadge />}</td>
+                  <td className="px-4 py-2.5 font-medium">
+                    {r.category} {r.is_demo && <DemoBadge />}
+                    {r.source === 'morning' && <span className="chip mr-1 bg-sky-50 text-sky-700" title="נקרא מהקבלות ב-Morning. משנים אותו ב-Morning">מ-Morning</span>}
+                  </td>
                   <td className="px-4 py-2.5 text-charcoal-500">{r.subcategory || '—'}</td>
                   <td className="whitespace-nowrap px-4 py-2.5 font-medium"><Money value={r.kind === 'expense' ? -r.amount_agorot : r.amount_agorot} /></td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-left">
-                    <button className="btn-ghost p-1.5" onClick={() => setEditing(r)} aria-label="עריכה"><Pencil className="h-4 w-4" /></button>
-                    <button className="btn-ghost p-1.5" onClick={() => remove(r)} aria-label="מחיקה"><Trash2 className="h-4 w-4" /></button>
+                    {r.source === 'morning' ? (
+                      r.pdf_url && <a className="btn-ghost p-1.5" href={r.pdf_url} target="_blank" rel="noopener noreferrer" title="פתיחת המסמך ב-Morning" aria-label="פתיחת המסמך ב-Morning"><ExternalLink className="h-4 w-4" /></a>
+                    ) : (
+                      <>
+                        <button className="btn-ghost p-1.5" onClick={() => setEditing(r)} aria-label="עריכה"><Pencil className="h-4 w-4" /></button>
+                        <button className="btn-ghost p-1.5" onClick={() => remove(r)} aria-label="מחיקה"><Trash2 className="h-4 w-4" /></button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

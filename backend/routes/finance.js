@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db, nowIso } from '../db.js';
+import { providerIncome } from '../accounting/financeIncome.js';
 
 const router = Router();
 const MAX_AMOUNT_AGOROT = 100_000_000_000; // 1 billion NIS: catches typos
@@ -25,7 +26,7 @@ function parseTransaction(body) {
   return { kind, date, category: cat, subcategory: sub, amount_agorot: amount };
 }
 
-const hydrate = (row) => ({ ...row, is_demo: !!row.is_demo });
+const hydrate = (row) => ({ ...row, source: 'manual', is_demo: !!row.is_demo });
 const getRow = (id) => db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
 
 router.get('/transactions', (req, res) => {
@@ -36,7 +37,10 @@ router.get('/transactions', (req, res) => {
   if (to) { sql += ' AND date <= ?'; args.push(String(to)); }
   if (kind) { sql += ' AND kind = ?'; args.push(String(kind)); }
   sql += ' ORDER BY date DESC, id DESC';
-  res.json(db.prepare(sql).all(...args).map(hydrate));
+  const manual = db.prepare(sql).all(...args).map(hydrate);
+  // Income from Morning is read from the synced receipts (read-only here), never copied.
+  const morning = kind === 'expense' ? [] : providerIncome({ from: from ? String(from) : null, to: to ? String(to) : null });
+  res.json([...manual, ...morning].sort((a, b) => b.date.localeCompare(a.date)));
 });
 
 router.post('/transactions', (req, res) => {
