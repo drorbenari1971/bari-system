@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 
+-- Expense types the owner added in the finance form ("הוספת סוג הוצאה חדש"), on top of the built-in list.
+CREATE TABLE IF NOT EXISTS finance_types (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL CHECK (kind IN ('income', 'expense')),
+  name       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT ${NOW},
+  UNIQUE (kind, name)
+);
+
 -- Instagram leads, synced from Airtable (where Apify collects them). Airtable is the source;
 -- only the outreach status is written back. status_pending = a local change not yet saved there.
 CREATE TABLE IF NOT EXISTS leads (

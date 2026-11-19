@@ -67,6 +67,28 @@ router.delete('/transactions/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Types the owner added, plus types already used in entries (typed before this list existed).
+const listTypes = (kind) => [...new Set([
+  ...db.prepare('SELECT name FROM finance_types WHERE kind = ? ORDER BY id').all(kind).map((r) => r.name),
+  ...db.prepare('SELECT DISTINCT category FROM transactions WHERE kind = ? ORDER BY category').all(kind).map((r) => r.category),
+])];
+
+router.get('/types', (req, res) => {
+  const kind = String(req.query.kind ?? '');
+  if (!['income', 'expense'].includes(kind)) return res.status(400).json({ error: 'סוג לא תקין' });
+  res.json(listTypes(kind));
+});
+
+router.post('/types', (req, res) => {
+  const { kind } = req.body;
+  const name = String(req.body.name ?? '').trim().replace(/\s+/g, ' ');
+  if (!['income', 'expense'].includes(kind)) return res.status(400).json({ error: 'סוג לא תקין' });
+  if (!name) return res.status(400).json({ error: 'יש להקליד שם' });
+  if (name.length > MAX_TEXT) return res.status(400).json({ error: `עד ${MAX_TEXT} תווים` });
+  db.prepare('INSERT OR IGNORE INTO finance_types (kind, name) VALUES (?, ?)').run(kind, name);
+  res.json({ name, types: listTypes(kind) });
+});
+
 // Removes only the sample rows, so real entries are not mixed with them in the totals.
 router.delete('/demo', (req, res) => {
   db.prepare('DELETE FROM transactions WHERE is_demo = 1').run();

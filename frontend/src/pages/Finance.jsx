@@ -14,6 +14,7 @@ import { Card, DemoBadge, Empty, ErrorNote, Modal, Notice, Spinner, StatCard } f
 const EXPENSE_TYPES = ['חשמל', 'מים', 'מערכות טכנולוגיות', 'מנויים', 'חומרי גלם', 'שליחויות', 'אריזות', 'שכירות', 'שיווק ופרסום', 'שכר', 'אחר'];
 const INCOME_TYPES = [...PRODUCTS.map((p) => p.label), 'אחר'];
 const KIND_LABEL = { income: 'הכנסה', expense: 'הוצאה' };
+const NEW_TYPE = '__new__';
 const PAGE_SIZE = 50;
 
 // Fixed for every palette and mode, so income and expenses always keep their color.
@@ -294,6 +295,54 @@ function Breakdown({ items }) {
   );
 }
 
+// Expense type: the built-in list, types the owner added and types already used, plus
+// "הוספת סוג הוצאה חדש", which saves a new type for next time too.
+function ExpenseTypeField({ value, onChange }) {
+  const [saved, setSaved] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => { api.get('/finance/types?kind=expense').then(setSaved).catch(() => {}); }, []);
+  const options = [...new Set([...EXPENSE_TYPES.filter((t) => t !== 'אחר'), ...saved, ...(value ? [value] : []), 'אחר'])];
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await api.post('/finance/types', { kind: 'expense', name });
+      setSaved(r.types);
+      onChange(r.name);
+      setAdding(false); setName('');
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+
+  if (adding) {
+    return (
+      <div className="space-y-1.5">
+        <div className="flex gap-1.5">
+          <input autoFocus maxLength={60} className="input" placeholder="שם סוג ההוצאה החדש" value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); if (name.trim()) save(); }
+              if (e.key === 'Escape') { setAdding(false); setError(null); }
+            }} />
+          <button type="button" className="btn-primary px-3" onClick={save} disabled={busy || !name.trim()}>{busy ? <Spinner /> : 'שמירה'}</button>
+          <button type="button" className="btn-ghost px-2" onClick={() => { setAdding(false); setError(null); }}>ביטול</button>
+        </div>
+        <ErrorNote error={error} />
+      </div>
+    );
+  }
+  return (
+    <select required className="input" value={value} onChange={(e) => (e.target.value === NEW_TYPE ? setAdding(true) : onChange(e.target.value))}>
+      <option value="" disabled>בחרו סוג הוצאה</option>
+      {options.map((t) => <option key={t} value={t}>{t}</option>)}
+      <option value={NEW_TYPE}>+ הוספת סוג הוצאה חדש…</option>
+    </select>
+  );
+}
+
 function TransactionForm({ row, onSaved }) {
   const blank = { kind: 'income', date: toDateInput(new Date()), category: '', subcategory: '', amount: '' };
   const [form, setForm] = useState(row
@@ -333,10 +382,16 @@ function TransactionForm({ row, onSaved }) {
         </div>
         <div>
           <label className="label">{isExpense ? 'סוג הוצאה' : 'מוצר או סיווג'}</label>
-          <input required maxLength={60} list={listId} className="input" placeholder="בחרו מהרשימה או הקלידו" value={form.category} onChange={set('category')} />
-          <datalist id={listId}>
-            {(isExpense ? EXPENSE_TYPES : INCOME_TYPES).map((t) => <option key={t} value={t} />)}
-          </datalist>
+          {isExpense ? (
+            <ExpenseTypeField value={form.category} onChange={(category) => setForm({ ...form, category })} />
+          ) : (
+            <>
+              <input required maxLength={60} list={listId} className="input" placeholder="בחרו מהרשימה או הקלידו" value={form.category} onChange={set('category')} />
+              <datalist id={listId}>
+                {INCOME_TYPES.map((t) => <option key={t} value={t} />)}
+              </datalist>
+            </>
+          )}
         </div>
         {isExpense && (
           <div>

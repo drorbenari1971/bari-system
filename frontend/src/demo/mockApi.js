@@ -378,6 +378,18 @@ const routes = [
     db.transactions = db.transactions.filter((t) => t.id !== Number(id));
     return { ok: true };
   }],
+  ['GET', /^\/finance\/types$/, (db, _m, _b, q) => [...new Set([
+    ...(db.financeTypes ?? []).filter((t) => t.kind === q.get('kind')).map((t) => t.name),
+    ...db.transactions.filter((t) => t.kind === q.get('kind')).map((t) => t.category).sort(),
+  ])]],
+  ['POST', /^\/finance\/types$/, (db, _m, body) => {
+    const name = String(body.name ?? '').trim().replace(/\s+/g, ' ');
+    if (!name) fail('יש להקליד שם');
+    if (name.length > 60) fail('עד 60 תווים');
+    db.financeTypes = db.financeTypes ?? [];
+    if (!db.financeTypes.some((t) => t.kind === body.kind && t.name === name)) db.financeTypes.push({ kind: body.kind, name });
+    return { name, types: db.financeTypes.filter((t) => t.kind === body.kind).map((t) => t.name) };
+  }],
   ['DELETE', /^\/finance\/demo$/, (db) => {
     db.transactions = db.transactions.filter((t) => !t.is_demo);
     return { ok: true };
